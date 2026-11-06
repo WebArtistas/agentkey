@@ -1,0 +1,113 @@
+{
+  "name": "agentkey",
+  "version": "0.1.0",
+  "description": "A local desktop vault that lets agents use approved secrets without receiving their values.",
+  "license": "Apache-2.0",
+  "private": true,
+  "main": "dist/desktop/main.js",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": "^24.15.0 || ^26.0.0"
+  },
+  "scripts": {
+    "ng": "ng",
+    "format": "prettier --write \"{core,agent,desktop,shared,src,tests,e2e,scripts,skills,integrations,examples}/**/*.{ts,cjs,mjs,html,less,md,json,yml}\" \"*.{json,md,yaml}\" \".github/workflows/*.yml\"",
+    "format:check": "prettier --check \"{core,agent,desktop,shared,src,tests,e2e,scripts,skills,integrations,examples}/**/*.{ts,cjs,mjs,html,less,md,json,yml}\" \"*.{json,md,yaml}\" \".github/workflows/*.yml\"",
+    "build:core": "tsc -p tsconfig.node.json",
+    "build:ui": "ng build agentkey",
+    "build": "pnpm build:core && pnpm build:ui",
+    "start": "pnpm build && pnpm desktop",
+    "desktop": "node scripts/desktop.cjs",
+    "agent": "node dist/agent/cli.js",
+    "test": "pnpm build:core && node --test dist/tests/*.test.js",
+    "test:e2e": "playwright test",
+    "test:database": "pnpm build:core && node --test dist/tests/integration/database.test.js",
+    "test:pi": "pnpm build:core && node --test integrations/pi/*.test.mjs",
+    "test:isolated": "pnpm build:core && node --test integrations/pi/docker.integration.mjs",
+    "sandbox:build": "pnpm build:core && docker build --file integrations/pi/Dockerfile --tag agentkey-pi:0.1.0 .",
+    "sandbox:pi": "node integrations/pi/host.mjs",
+    "check": "pnpm test && pnpm build:ui",
+    "package:dir": "pnpm build && electron-builder --dir --publish never",
+    "package": "pnpm build && electron-builder --publish never"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "ipaddr.js": "2.5.0",
+    "pg": "8.23.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@angular/build": "22.2.6",
+    "@angular/cli": "22.2.6",
+    "@angular/common": "22.2.4",
+    "@angular/compiler": "22.2.4",
+    "@angular/compiler-cli": "22.2.4",
+    "@angular/core": "22.2.4",
+    "@angular/forms": "22.2.4",
+    "@angular/platform-browser": "22.2.4",
+    "@angular/router": "22.2.4",
+    "@axe-core/playwright": "4.14.0",
+    "@ng-web-apis/common": "5.4.1",
+    "@ng-web-apis/intersection-observer": "5.4.1",
+    "@ng-web-apis/mutation-observer": "5.4.1",
+    "@ng-web-apis/platform": "5.4.1",
+    "@playwright/test": "1.64.1",
+    "@taiga-ui/cdk": "5.31.0",
+    "@taiga-ui/core": "5.31.0",
+    "@taiga-ui/event-plugins": "5.1.0",
+    "@taiga-ui/i18n": "5.31.0",
+    "@taiga-ui/icons": "5.31.0",
+    "@taiga-ui/kit": "5.31.0",
+    "@taiga-ui/polymorpheus": "5.0.1",
+    "@taiga-ui/styles": "5.31.0",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
+    "less": "4.9.1",
+    "prettier": "3.9.10",
+    "rxjs": "7.8.2",
+    "tslib": "2.9.1",
+    "typescript": "6.0.3"
+  },
+  "build": {
+    "appId": "org.agentkey.desktop",
+    "productName": "AgentKey",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/core/**",
+      "dist/shared/**",
+      "dist/desktop/**",
+      "dist/agent/**",
+      "dist/agentkey/browser/**",
+      "LICENSE",
+      "README.md",
+      "SECURITY.md",
+      "skills/**"
+    ],
+    "asar": true,
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false
+    }
+  }
+}

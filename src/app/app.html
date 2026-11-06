@@ -1,0 +1,645 @@
+<tui-root>
+  <div class="shell" [class.compact]="compact">
+    <aside class="sidebar" aria-label="Application navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">a/k</span>
+        <div>
+          <strong>AgentKey</strong>
+          @if (!compact) {
+            <small>YOUR SECRETS. YOUR RULES.</small>
+          }
+        </div>
+        @if (compact) {
+          <div class="toolbar-actions">
+            @if (snapshot()?.unlocked) {
+              <button
+                tuiButton
+                appearance="secondary"
+                size="s"
+                [disabled]="busy()"
+                (click)="lock()"
+              >
+                Lock vault
+              </button>
+            }
+            <button
+              tuiButton
+              appearance="flat"
+              size="s"
+              [disabled]="busy()"
+              (click)="showWindow('full')"
+            >
+              Full window
+            </button>
+            <button
+              tuiButton
+              appearance="flat"
+              size="s"
+              aria-label="Close quick access"
+              (click)="dismiss()"
+            >
+              ×
+            </button>
+          </div>
+        }
+      </div>
+      <p class="sidebar-caption">LOCAL CONTROL</p>
+      <nav aria-label="Main">
+        @for (entry of pages; track entry.id) {
+          <button
+            tuiButton
+            [size]="compact ? 's' : 'm'"
+            [appearance]="page() === entry.id ? 'secondary' : 'flat'"
+            [attr.aria-current]="page() === entry.id ? 'page' : null"
+            [disabled]="!snapshot()?.unlocked"
+            (click)="navigate(entry.id)"
+          >
+            <span class="nav-number">{{ entry.number }}</span
+            >{{ compact && entry.id === 'connect' ? 'Connect' : entry.label }}
+          </button>
+        }
+      </nav>
+      <div class="sidebar-bottom">
+        <span class="status-dot" [class.unlocked]="snapshot()?.unlocked"></span
+        >{{ snapshot()?.unlocked ? 'Vault unlocked' : 'Vault locked' }}
+        <p>Local-only · No cloud account<br />Open source · Apache-2.0</p>
+      </div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <span class="eyebrow">SECRET ACCESS, NOT SECRET SHARING</span>
+        <div class="toolbar-actions">
+          <button
+            tuiButton
+            appearance="flat"
+            size="s"
+            [disabled]="busy()"
+            (click)="showWindow('compact')"
+          >
+            Quick access
+          </button>
+          @if (snapshot()?.unlocked) {
+            <button tuiButton appearance="secondary" size="s" [disabled]="busy()" (click)="lock()">
+              Lock vault
+            </button>
+          }
+        </div>
+      </header>
+      @if (failure()) {
+        <div class="feedback error" role="alert">{{ failure() }}</div>
+      }
+      @if (message()) {
+        <div class="feedback" role="status">{{ message() }}</div>
+      }
+      @if (!snapshot()) {
+        <h1>Welcome to AgentKey</h1>
+        <p>Connecting to your local vault…</p>
+      } @else if (!snapshot()!.unlocked) {
+        <section class="welcome">
+          <div class="eyebrow">A PRIVATE HANDOFF</div>
+          <h1>Let agents work.<br />Keep secrets yours.</h1>
+          <p class="intro">
+            Name your credentials. Decide what they can do.<br />Your agent gets permission—not your
+            password.
+          </p>
+          <form class="unlock-form" (submit)="$event.preventDefault(); authenticate()">
+            <h2>{{ snapshot()!.initialized ? 'Unlock your vault' : 'Create your local vault' }}</h2>
+            <tui-textfield [tuiTextfieldCleaner]="false"
+              ><label tuiLabel>Master passphrase</label
+              ><input
+                tuiInput
+                [type]="masterVisibility.visible() ? 'text' : 'password'"
+                [formField]="authForm.password"
+                autocomplete="off"
+              />
+              <button
+                tuiButton
+                appPasswordToggle
+                #masterVisibility
+                appearance="flat"
+                size="s"
+                fieldName="master passphrase"
+              ></button>
+            </tui-textfield>
+            @if (!snapshot()!.initialized) {
+              <tui-textfield [tuiTextfieldCleaner]="false"
+                ><label tuiLabel>Confirm passphrase</label
+                ><input
+                  tuiInput
+                  [type]="confirmationVisibility.visible() ? 'text' : 'password'"
+                  [formField]="authForm.confirmation"
+                  autocomplete="off"
+                />
+                <button
+                  tuiButton
+                  appPasswordToggle
+                  #confirmationVisibility
+                  appearance="flat"
+                  size="s"
+                  fieldName="confirmation passphrase"
+                ></button>
+              </tui-textfield>
+              <p class="hint">
+                Use at least 14 characters. There is no recovery service. Keep a safe copy of your
+                passphrase and encrypted vault.
+              </p>
+            }
+            <button tuiButton type="submit" [disabled]="busy()">
+              {{
+                busy()
+                  ? 'Working…'
+                  : snapshot()!.initialized
+                    ? 'Unlock vault'
+                    : 'Create encrypted vault'
+              }}
+            </button>
+          </form>
+          <p class="hint">
+            Early development release. Not independently audited. Use test credentials first.
+          </p>
+        </section>
+      } @else {
+        @switch (page()) {
+          @case ('vault') {
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">01 / VAULT</p>
+                <h1>
+                  @if (compact) {
+                    Vault
+                  } @else {
+                    Names they can use.<br />Values they can’t read.
+                  }
+                </h1>
+              </div>
+              <button tuiButton [disabled]="busy()" (click)="newItem()">Add item</button>
+            </div>
+            @if (editingItem()) {
+              <app-item-editor
+                [initial]="initialItem()"
+                [busy]="busy()"
+                (save)="saveItem($event)"
+                (cancel)="editingItem.set(false)"
+              />
+            }
+            <div class="item-list">
+              @for (item of snapshot()!.items; track item.name) {
+                <article class="item-row">
+                  <div class="item-symbol" aria-hidden="true">
+                    {{ item.kind === 'group' ? '{ }' : item.kind === 'login' ? '@' : '*' }}
+                  </div>
+                  <div class="item-detail">
+                    <span class="eyebrow">{{ item.kind }}</span>
+                    <h2>{{ item.name }}</h2>
+                    <p class="mono">{{ item.fields.join(' · ') }}</p>
+                  </div>
+                  <span class="secret-mask" aria-label="Values hidden">••••••••</span>
+                  <div class="row-actions">
+                    <button tuiButton appearance="flat" size="s" (click)="newItem(item)">
+                      Replace values</button
+                    ><button tuiButton appearance="flat" size="s" (click)="deleting.set(item.name)">
+                      Delete
+                    </button>
+                  </div>
+                  @if (deleting() === item.name) {
+                    <div class="delete-confirm">
+                      <p>Delete this item, its operations and approvals?</p>
+                      <button
+                        tuiButton
+                        size="s"
+                        [disabled]="busy()"
+                        (click)="removeItem(item.name)"
+                      >
+                        Confirm deletion</button
+                      ><button tuiButton appearance="flat" size="s" (click)="deleting.set('')">
+                        Cancel
+                      </button>
+                    </div>
+                  }
+                </article>
+              } @empty {
+                <div class="empty-state">
+                  <span class="empty-symbol" aria-hidden="true">&#123; * &#125;</span>
+                  <h2>Start with a name.</h2>
+                  <p>
+                    Add a single secret, a username/password login,<br />or a group of named
+                    variables.
+                  </p>
+                </div>
+              }
+            </div>
+          }
+          @case ('operations') {
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">02 / API OPERATIONS</p>
+                <h1>
+                  @if (compact) {
+                    API operations
+                  } @else {
+                    Define the job.<br />Fix the destination.
+                  }
+                </h1>
+              </div>
+              <button
+                tuiButton
+                [disabled]="!snapshot()!.items.length || busy()"
+                (click)="editingOperation.set(true)"
+              >
+                Add operation
+              </button>
+            </div>
+            <p class="intro">
+              Saved HTTPS requests. No arbitrary commands, redirects or secret retrieval.
+            </p>
+            @if (editingOperation()) {
+              <app-operation-editor
+                [items]="snapshot()!.items"
+                [busy]="busy()"
+                (save)="saveOperation($event)"
+                (cancel)="editingOperation.set(false)"
+              />
+            }
+            @for (operation of snapshot()!.operations; track operation.name) {
+              <article class="operation-row">
+                <div class="section-heading">
+                  <h2>{{ operation.name }}</h2>
+                  <button
+                    tuiButton
+                    appearance="flat"
+                    size="s"
+                    (click)="deleting.set(operation.name)"
+                  >
+                    Delete
+                  </button>
+                </div>
+                <p class="endpoint">
+                  <strong>{{ operation.method }}</strong> {{ operation.url }}
+                </p>
+                <p>
+                  Uses <code>{{ operation.item }}</code> · {{ operation.auth }} authentication ·
+                  {{ operation.hasBody ? 'Fixed JSON body' : 'No body' }}
+                </p>
+                @for (binding of operation.bindings; track binding.header) {
+                  <p class="mono hint">
+                    {{ binding.field }} → {{ binding.header
+                    }}{{ binding.prefix ? ' (prefix: ' + binding.prefix + ')' : '' }}
+                  </p>
+                }
+                @if (deleting() === operation.name) {
+                  <div class="delete-confirm">
+                    <p>Delete this operation and its approval?</p>
+                    <button
+                      tuiButton
+                      size="s"
+                      [disabled]="busy()"
+                      (click)="removeOperation(operation.name)"
+                    >
+                      Confirm deletion</button
+                    ><button tuiButton appearance="flat" size="s" (click)="deleting.set('')">
+                      Cancel
+                    </button>
+                  </div>
+                }
+              </article>
+            } @empty {
+              <div class="empty-state">
+                <h2>No API operations yet.</h2>
+                <p>Add a vault item, then define exactly what an agent may do with it.</p>
+              </div>
+            }
+          }
+          @case ('databases') {
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">03 / DATABASES</p>
+                <h1>
+                  @if (compact) {
+                    Databases
+                  } @else {
+                    Useful data.<br />Private credentials.
+                  }
+                </h1>
+              </div>
+              <button
+                tuiButton
+                [disabled]="!snapshot()!.items.length || busy()"
+                (click)="newDatabase()"
+              >
+                Add database
+              </button>
+            </div>
+            <p class="intro">
+              Start with a SQLite demo—no server or password needed. Choose tables and columns
+              explicitly. Reads are bounded; agents cannot send SQL or write data. PostgreSQL
+              remains available through Add database.
+            </p>
+            <div class="database-actions">
+              <button tuiButton [disabled]="busy()" (click)="prepareSQLite('demo')">
+                Try SQLite demo
+              </button>
+              <button
+                tuiButton
+                appearance="secondary"
+                [disabled]="busy()"
+                (click)="prepareSQLite('file')"
+              >
+                Choose SQLite file
+              </button>
+            </div>
+            @if (sqliteSelection(); as selection) {
+              <app-sqlite-editor
+                [selection]="selection"
+                [busy]="busy()"
+                (save)="saveSQLite($event)"
+                (cancel)="sqliteSelection.set(null)"
+              />
+            }
+            @if (editingDatabase()) {
+              <app-database-editor
+                [items]="snapshot()!.items"
+                [initial]="initialDatabase()"
+                [busy]="busy()"
+                (save)="saveDatabase($event)"
+                (cancel)="editingDatabase.set(false)"
+              />
+            }
+            @for (database of snapshot()!.databases; track database.name) {
+              <article class="operation-row">
+                <div class="section-heading">
+                  <h2>{{ database.name }}</h2>
+                  <div class="row-actions">
+                    <button tuiButton appearance="flat" size="s" (click)="newDatabase(database)">
+                      Edit policy</button
+                    ><button
+                      tuiButton
+                      appearance="flat"
+                      size="s"
+                      (click)="deleting.set(database.name)"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+                <p>
+                  {{ database.engine === 'sqlite' ? 'SQLite file reference' : 'PostgreSQL URL' }}
+                  from <code>{{ database.item }}.{{ database.field }}</code
+                  >. The saved source value is never returned.
+                </p>
+                @for (table of database.tables; track $index) {
+                  <p class="mono">
+                    {{ table.schema }}.{{ table.table }} → {{ table.columns.join(', ') }}
+                  </p>
+                }
+                @if (deleting() === database.name) {
+                  <div class="delete-confirm">
+                    <p>Delete this database policy and its approval?</p>
+                    <button
+                      tuiButton
+                      size="s"
+                      [disabled]="busy()"
+                      (click)="removeOperation(database.name)"
+                    >
+                      Confirm deletion</button
+                    ><button tuiButton appearance="flat" size="s" (click)="deleting.set('')">
+                      Cancel
+                    </button>
+                  </div>
+                }
+              </article>
+            } @empty {
+              <div class="empty-state">
+                <h2>No database connections yet.</h2>
+                <p>
+                  Try the synthetic SQLite demo, or choose a closed SQLite copy and select its
+                  allowed columns.
+                </p>
+              </div>
+            }
+          }
+          @case ('access') {
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">04 / APPROVALS</p>
+                <h1>{{ compact ? 'Approvals' : 'You set the limits.' }}</h1>
+              </div>
+            </div>
+            <p class="notice">
+              Approvals apply to <strong>all local clients running as your OS user</strong>, not a
+              verified agent identity. Repeated operations may have repeated side effects. Access
+              works only while AgentKey is running and unlocked.
+            </p>
+            @if (snapshot()!.pending.length) {
+              <div class="feedback">
+                <strong>Awaiting your decision:</strong>
+                @for (request of snapshot()!.pending; track request.operation) {
+                  <code>{{ request.operation }} </code>
+                }
+              </div>
+            }
+            <div class="approval-duration">
+              <tui-textfield [tuiTextfieldCleaner]="false"
+                ><label tuiLabel>New approval duration</label
+                ><input tuiSelect [formField]="approvalForm.duration" /><tui-data-list-wrapper
+                  *tuiDropdown
+                  [items]="durations"
+              /></tui-textfield>
+            </div>
+            <p class="hint">
+              “once” allows one attempt, even if it fails. “until-revoked” stays approved across
+              restarts, but you must unlock the vault again.
+            </p>
+            @for (operation of snapshot()!.operations; track operation.name) {
+              <article class="operation-row">
+                <h2>{{ operation.name }}</h2>
+                <p class="endpoint">
+                  <strong>{{ operation.method }}</strong> {{ operation.url }}
+                </p>
+                <p>
+                  Item: <code>{{ operation.item }}</code> · {{ operation.auth }} ·
+                  {{ operation.hasBody ? 'Fixed JSON body' : 'No body' }}
+                </p>
+                @for (binding of operation.bindings; track binding.header) {
+                  <p class="mono hint">{{ binding.field }} → {{ binding.header }}</p>
+                }
+                @if (grant(operation.name); as active) {
+                  <div class="grant-state">
+                    <span
+                      >Approved ·
+                      {{
+                        active.remainingUses
+                          ? 'One attempt remaining'
+                          : active.expiresAt
+                            ? 'Until ' + (active.expiresAt | date: 'medium')
+                            : 'Until revoked'
+                      }}</span
+                    ><button
+                      tuiButton
+                      appearance="secondary"
+                      size="s"
+                      [disabled]="busy()"
+                      (click)="revoke(operation.name)"
+                    >
+                      Revoke access
+                    </button>
+                  </div>
+                } @else {
+                  <button
+                    tuiButton
+                    size="m"
+                    [disabled]="busy()"
+                    (click)="approve(operation.name, operation.revision)"
+                  >
+                    Approve {{ operation.name }}
+                  </button>
+                }
+              </article>
+            }
+            @for (database of snapshot()!.databases; track database.name) {
+              <article class="operation-row">
+                <h2>{{ database.name }}</h2>
+                <p class="notice">
+                  Read-only {{ database.engine === 'sqlite' ? 'SQLite' : 'PostgreSQL' }}. These
+                  columns may be returned to the agent and its model provider. Credentials stay in
+                  AgentKey.
+                </p>
+                @for (table of database.tables; track $index) {
+                  <p class="mono">
+                    {{ table.schema }}.{{ table.table }} → {{ table.columns.join(', ') }}
+                  </p>
+                }
+                @if (grant(database.name); as active) {
+                  <div class="grant-state">
+                    <span
+                      >Approved ·
+                      {{
+                        active.remainingUses
+                          ? 'One attempt remaining'
+                          : active.expiresAt
+                            ? 'Until ' + (active.expiresAt | date: 'medium')
+                            : 'Until revoked'
+                      }}</span
+                    >
+                    <button
+                      tuiButton
+                      appearance="secondary"
+                      size="s"
+                      [disabled]="busy()"
+                      (click)="revoke(database.name)"
+                    >
+                      Revoke access
+                    </button>
+                  </div>
+                } @else {
+                  <button
+                    tuiButton
+                    size="m"
+                    [disabled]="busy()"
+                    (click)="approve(database.name, database.revision)"
+                  >
+                    Approve {{ database.name }}
+                  </button>
+                }
+              </article>
+            }
+            @if (!snapshot()!.operations.length && !snapshot()!.databases.length) {
+              <div class="empty-state">
+                <h2>Nothing to approve yet.</h2>
+                <p>Define an API operation or database connection first.</p>
+              </div>
+            }
+          }
+          @case ('activity') {
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">05 / ACTIVITY</p>
+                <h1>{{ compact ? 'Recent activity' : 'A record. Not a leak.' }}</h1>
+              </div>
+            </div>
+            <p class="intro">
+              The latest 200 events, encrypted with your vault. No credentials, request bodies or
+              API responses.
+            </p>
+            <div class="activity-list">
+              @for (event of snapshot()!.audit; track $index) {
+                <div class="activity-row">
+                  <time>{{ event.at | date: 'medium' }}</time
+                  ><strong>{{ event.event }}</strong
+                  ><code>{{ event.name }}</code
+                  ><span>{{ event.status ?? '' }}</span>
+                </div>
+              } @empty {
+                <p>No activity yet.</p>
+              }
+            </div>
+          }
+          @case ('connect') {
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">06 / CONNECT</p>
+                <h1>
+                  @if (compact) {
+                    Connect an agent
+                  } @else {
+                    One protocol.<br />Your choice of agent.
+                  }
+                </h1>
+              </div>
+            </div>
+            @if (isolatedDirectory()) {
+              <h2>Isolated Pi database mode — Linux</h2>
+              <p>
+                Build the runner with <code>pnpm sandbox:build</code>, then use
+                <code>pnpm sandbox:pi</code> with the setup in README.md. This fresh broker
+                directory is the only AgentKey directory the container may receive:
+              </p>
+              <pre class="config" aria-label="Isolated broker directory">{{
+                isolatedDirectory()
+              }}</pre>
+              <p class="notice">
+                Never mount the vault directory, home directory or Docker socket into an agent. The
+                isolated runner has no external network or shell tools. Provider authentication
+                stays on the host; approved database results still enter model context. The
+                directory changes when AgentKey restarts.
+              </p>
+            }
+            <h2>Standard MCP — trusted local clients</h2>
+            <p class="intro">
+              Use this stdio MCP configuration in a compatible client. Client config formats vary;
+              this is the common <code>mcpServers</code> format.
+            </p>
+            <pre class="config">{{ connection() }}</pre>
+            <ol class="setup-steps">
+              <li>Add this server to your agent’s MCP configuration and restart its connection.</li>
+              <li>Ask it to list AgentKey operations and request access by name.</li>
+              <li>Review the exact destination and approve in this app.</li>
+              <li>
+                Let it repeat the operation within the approved duration. Revoke access whenever
+                needed.
+              </li>
+            </ol>
+            <p class="notice">
+              This standard connection does not isolate an agent with access to your OS account. No
+              credentials belong in MCP configuration, chat or prompts. The source build requires
+              Node.js on PATH. The desktop app stays running in the tray when its window closes.
+            </p>
+            <p class="hint">
+              Bundled usage skill: <code>skills/agentkey/SKILL.md</code>. No browser autofill,
+              arbitrary shell execution, cloud sync or iOS support in this release.
+            </p>
+          }
+        }
+      }
+    </main>
+    @if (compact) {
+      <footer class="panel-footer">
+        <span class="status-dot" [class.unlocked]="snapshot()?.unlocked"></span>
+        {{
+          snapshot()?.unlocked
+            ? 'Unlocked · Closing this panel does not lock the vault.'
+            : 'Locked · Unlock here to manage access.'
+        }}
+      </footer>
+    }
+  </div>
+</tui-root>

@@ -1,0 +1,27 @@
+packages:
+  - '.'
+  - 'integrations/pi'
+
+# The upstream optional WASM graph currently resolves incompatible alpha peers.
+overrides:
+  '@emnapi/core': 1.11.3
+  '@emnapi/runtime': 1.11.3
+
+allowBuilds:
+  '@parcel/watcher': false
+  esbuild: true
+  electron: true
+  electron-winstaller: false
+  lmdb: false
+  msgpackr-extract: false
+  '@google/genai': false # Published preinstall is a no-op.
+  protobufjs: false # Postinstall only warns about dependency version notation.
+
+minimumReleaseAgeExclude:
+  - '@angular-devkit/architect@0.2202.6'
+  - '@angular-devkit/core@22.2.6'
+  - '@angular-devkit/schematics@22.2.6'
+  - '@angular/build@22.2.6'
+  - '@angular/cli@22.2.6'
+  - '@schematics/angular@22.2.6'
+  - electron@45.2.3
