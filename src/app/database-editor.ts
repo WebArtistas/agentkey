@@ -16,7 +16,10 @@ import type { DatabaseInput, ItemSummary } from '../../shared/contracts';
         </button>
       </div>
       <p class="notice">
-        @if (draft().engine === 'sqlite') {
+        @if (initial()?.source === 'snapshot') {
+          Encrypted SQLite snapshot. You can narrow its allowed columns here. Re-import using the
+          same connection name to refresh data or allow additional columns. No writes or raw SQL.
+        } @else if (draft().engine === 'sqlite') {
           SQLite file access. Keep the saved source reference and use the main schema. No writes or
           raw SQL.
         } @else {
@@ -27,24 +30,31 @@ import type { DatabaseInput, ItemSummary } from '../../shared/contracts';
       </p>
       <tui-textfield [tuiTextfieldCleaner]="false">
         <label tuiLabel>Connection name</label
-        ><input tuiInput [formField]="fields.name" placeholder="project-dev-db" />
+        ><input
+          tuiInput
+          [formField]="fields.name"
+          [readOnly]="initial()?.source === 'snapshot'"
+          placeholder="project-dev-db"
+        />
       </tui-textfield>
-      <div class="field-row">
-        <tui-textfield [tuiTextfieldCleaner]="false">
-          <label tuiLabel>{{
-            draft().engine === 'sqlite' ? 'Source vault item' : 'URL vault item'
-          }}</label
-          ><input tuiSelect [formField]="fields.item" />
-          <tui-data-list-wrapper *tuiDropdown [items]="itemNames()" />
-        </tui-textfield>
-        <tui-textfield [tuiTextfieldCleaner]="false">
-          <label tuiLabel>{{
-            draft().engine === 'sqlite' ? 'Source field' : 'URL secret field'
-          }}</label
-          ><input tuiSelect [formField]="fields.field" />
-          <tui-data-list-wrapper *tuiDropdown [items]="fieldNames()" />
-        </tui-textfield>
-      </div>
+      @if (initial()?.source !== 'snapshot') {
+        <div class="field-row">
+          <tui-textfield [tuiTextfieldCleaner]="false">
+            <label tuiLabel>{{
+              draft().engine === 'sqlite' ? 'Source vault item' : 'URL vault item'
+            }}</label
+            ><input tuiSelect [formField]="fields.item" />
+            <tui-data-list-wrapper *tuiDropdown [items]="itemNames()" />
+          </tui-textfield>
+          <tui-textfield [tuiTextfieldCleaner]="false">
+            <label tuiLabel>{{
+              draft().engine === 'sqlite' ? 'Source field' : 'URL secret field'
+            }}</label
+            ><input tuiSelect [formField]="fields.field" />
+            <tui-data-list-wrapper *tuiDropdown [items]="fieldNames()" />
+          </tui-textfield>
+        </div>
+      }
       @for (table of fields.tables; track $index; let index = $index) {
         <div class="field-row">
           <tui-textfield [tuiTextfieldCleaner]="false"
@@ -105,8 +115,8 @@ export class DatabaseEditor {
     return {
       engine: initial?.engine ?? 'postgres',
       name: initial?.name ?? '',
-      item: initial?.item ?? '',
-      field: initial?.field ?? '',
+      item: initial?.source === 'snapshot' ? '' : (initial?.item ?? ''),
+      field: initial?.source === 'snapshot' ? '' : (initial?.field ?? ''),
       tables: initial?.tables.map((table) => ({ ...table, columns: table.columns.join(', ') })) ?? [
         { schema: 'public', table: '', columns: '' },
       ],
@@ -115,8 +125,8 @@ export class DatabaseEditor {
   protected readonly fields = form(this.draft, (path) => {
     required(path.name);
     maxLength(path.name, 64);
-    required(path.item);
-    required(path.field);
+    required(path.item, { when: () => this.initial()?.source !== 'snapshot' });
+    required(path.field, { when: () => this.initial()?.source !== 'snapshot' });
     applyEach(path.tables, (table) => {
       required(table.schema);
       maxLength(table.schema, 63);
@@ -147,12 +157,21 @@ export class DatabaseEditor {
   }
   protected submit(): void {
     const draft = this.draft();
-    this.save.emit({
-      ...draft,
-      tables: draft.tables.map((table) => ({
-        ...table,
-        columns: table.columns.split(',').map((column) => column.trim()),
-      })),
-    });
+    const tables = draft.tables.map((table) => ({
+      ...table,
+      columns: table.columns.split(',').map((column) => column.trim()),
+    }));
+    const initial = this.initial();
+    this.save.emit(
+      initial?.source === 'snapshot'
+        ? {
+            source: 'snapshot',
+            engine: 'sqlite',
+            snapshot: initial.snapshot,
+            name: initial.name,
+            tables,
+          }
+        : { ...draft, tables },
+    );
   }
 }

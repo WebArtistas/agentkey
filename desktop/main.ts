@@ -16,15 +16,19 @@ import {
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { createMcpServer } from '../agent/mcp';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { startBroker, startDatabaseBroker } from '../core/broker';
+import { startBroker } from '../core/broker';
 import { durationSchema, nameSchema, parseInput, publicError, SafeError } from '../core/schema';
 import { SQLiteSetup } from '../core/sqlite-setup';
 import { Vault } from '../core/vault';
 import { panelBounds } from './panel';
 
 app.setName('AgentKey');
+if (process.argv.includes('--mcp')) {
+  process.stderr.write(
+    'The desktop --mcp entry point has been retired. Copy the updated configuration from Connect an agent; the packaged adapter uses the bundled Node runtime.\n',
+  );
+  app.exit(1);
+}
 app.enableSandbox();
 const dataIndex = process.argv.indexOf('--data-dir');
 const customDirectory = dataIndex < 0 ? undefined : process.argv[dataIndex + 1];
@@ -47,7 +51,6 @@ let tray: Tray | undefined;
 let vault: Vault | undefined;
 let sqliteSetup: SQLiteSetup | undefined;
 let broker: Awaited<ReturnType<typeof startBroker>> | undefined;
-let databaseBroker: Awaited<ReturnType<typeof startDatabaseBroker>> | undefined;
 let quitting = false;
 
 function show(): void {
@@ -75,6 +78,7 @@ function secureWindow(view: BrowserWindow): void {
   view.webContents.on('will-navigate', (event) => event.preventDefault());
   view.webContents.on('will-attach-webview', (event) => event.preventDefault());
   view.webContents.on('render-process-gone', () => {
+    sqliteSetup?.clear();
     vault?.lock();
     for (const other of [window, panel]) {
       if (other && other !== view && !other.isDestroyed()) other.webContents.reload();
@@ -185,6 +189,8 @@ function handle(channel: string, action: (input: unknown) => unknown): void {
       return { ok: true, value: await action(input) };
     } catch (error) {
       return { ok: false, error: publicError(error) };
+    } finally {
+      if (!vault?.storage.unlocked) sqliteSetup?.clear();
     }
   });
 }
@@ -276,6 +282,7 @@ async function desktop(): Promise<void> {
     return setup.prepare(path);
   });
   handle('vault:save-sqlite', (input) => setup.save(input));
+  handle('vault:cancel-sqlite', (input) => setup.cancel(input));
   handle('vault:delete-operation', (input) => owner.deleteOperation(input));
   handle('vault:approve', (input) => {
     const parsed = parseInput(
@@ -283,10 +290,11 @@ async function desktop(): Promise<void> {
         operation: nameSchema,
         duration: durationSchema,
         revision: z.string().uuid(),
+        dataSharingAccepted: z.boolean().optional(),
       }),
       input,
     );
-    owner.approve(parsed.operation, parsed.duration, parsed.revision);
+    owner.approve(parsed.operation, parsed.duration, parsed.revision, parsed.dataSharingAccepted);
   });
   handle('vault:revoke', (input) => owner.revoke(input));
   handle('window:show', async (input) => {
@@ -297,11 +305,9 @@ async function desktop(): Promise<void> {
   handle('window:hide-panel', () => panel?.hide());
   handle('vault:connection', () => ({
     dataDirectory,
-    ...(databaseBroker ? { isolatedDirectory: databaseBroker.directory } : {}),
     command: app.isPackaged ? process.execPath : 'node',
-    args: app.isPackaged
-      ? ['--mcp', '--data-dir', dataDirectory]
-      : [join(app.getAppPath(), 'dist/agent/cli.js'), 'mcp', '--data-dir', dataDirectory],
+    args: [join(app.getAppPath(), 'dist/agent/cli.js'), 'mcp', '--data-dir', dataDirectory],
+    ...(app.isPackaged ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}),
   }));
   window = new BrowserWindow({
     width: 1150,
@@ -356,44 +362,28 @@ async function desktop(): Promise<void> {
   broker = await startBroker(owner, () => {
     window?.flashFrame(true);
   });
-  if (process.platform === 'linux')
-    databaseBroker = await startDatabaseBroker(owner, () => window?.flashFrame(true));
   powerMonitor.on('suspend', lock);
   powerMonitor.on('lock-screen', lock);
   app.on('activate', show);
   await window.loadURL(APP_URL);
 }
 
-if (process.argv.includes('--mcp')) {
-  void app
-    .whenReady()
-    .then(async () => {
-      const server = createMcpServer(app.getPath('userData'));
-      server.server.onclose = () => app.quit();
-      await server.connect(new StdioServerTransport());
-    })
-    .catch(() => {
-      process.stderr.write('Unable to start the AgentKey MCP adapter.\n');
-      app.exit(1);
-    });
-} else {
-  app.on('window-all-closed', () => app.quit());
-  app.on('before-quit', (event) => {
-    if (quitting) return;
-    event.preventDefault();
-    quitting = true;
-    sqliteSetup?.clear();
-    vault?.lock();
-    void Promise.allSettled([broker?.close(), databaseBroker?.close()]).finally(() => {
-      tray?.destroy();
-      app.exit(0);
-    });
+app.on('window-all-closed', () => app.quit());
+app.on('before-quit', (event) => {
+  if (quitting) return;
+  event.preventDefault();
+  quitting = true;
+  sqliteSetup?.clear();
+  vault?.lock();
+  void Promise.allSettled([broker?.close()]).finally(() => {
+    tray?.destroy();
+    app.exit(0);
   });
-  void desktop().catch(() => {
-    process.stderr.write(
-      'AgentKey could not start. Check the data directory and desktop environment.\n',
-    );
-    vault?.lock();
-    app.exit(1);
-  });
-}
+});
+void desktop().catch(() => {
+  process.stderr.write(
+    'AgentKey could not start. Check the data directory and desktop environment.\n',
+  );
+  vault?.lock();
+  app.exit(1);
+});

@@ -12,9 +12,10 @@ const api: DesktopApi = {
   saveDatabase: (database) => ipcRenderer.invoke('vault:save-database', database),
   prepareSQLite: (source) => ipcRenderer.invoke('vault:prepare-sqlite', source),
   saveSQLite: (input) => ipcRenderer.invoke('vault:save-sqlite', input),
+  cancelSQLite: (token) => ipcRenderer.invoke('vault:cancel-sqlite', token),
   deleteOperation: (name) => ipcRenderer.invoke('vault:delete-operation', name),
-  approve: (operation, duration, revision) =>
-    ipcRenderer.invoke('vault:approve', { operation, duration, revision }),
+  approve: (operation, duration, revision, dataSharingAccepted) =>
+    ipcRenderer.invoke('vault:approve', { operation, duration, revision, dataSharingAccepted }),
   showWindow: (view) => ipcRenderer.invoke('window:show', view),
   hidePanel: () => ipcRenderer.invoke('window:hide-panel'),
   revoke: (operation) => ipcRenderer.invoke('vault:revoke', operation),

@@ -20,7 +20,9 @@ import {
   type VaultData,
 } from './schema';
 import { VaultStorage } from './storage';
-import { databaseReadSchema, databaseSchema } from './database-schema';
+import { databaseReadSchema, databaseSchema, databaseTablesSchema } from './database-schema';
+import { loadSQLiteSnapshot, saveSQLiteSnapshot } from './sqlite-snapshots';
+import { readSQLiteBytes } from './sqlite';
 import { databaseSecret, readDatabase, readStatement, type ReadDatabase } from './database';
 import { secretHeaders, sendOperation, validateOperation, type SendOperation } from './transport';
 
@@ -44,7 +46,14 @@ export class Vault {
     this.storage = new VaultStorage(directory);
   }
   initialize(password: string): void {
-    const data: VaultData = { items: [], operations: [], databases: [], grants: [], audit: [] };
+    const data: VaultData = {
+      items: [],
+      operations: [],
+      databases: [],
+      snapshots: [],
+      grants: [],
+      audit: [],
+    };
     this.storage.initialize(password, data);
     this.#data = data;
   }
@@ -81,10 +90,7 @@ export class Vault {
         ...structuredClone(database),
         revision: this.policyRevision(database.name),
       })),
-      grants: structuredClone(
-        data?.grants.filter((grant) => grant.expiresAt === null || grant.expiresAt > Date.now()) ??
-          [],
-      ),
+      grants: structuredClone(data?.grants.filter((grant) => this.hasGrant(grant.operation)) ?? []),
       pending: Array.from(this.#pending, ([operation, requestedAt]): PendingSummary => ({
         operation,
         requestedAt,
@@ -98,7 +104,7 @@ export class Vault {
     // Rotation invalidates grants, even if an operation keeps its name.
     const affected = new Set(
       [...data.operations, ...data.databases]
-        .filter((operation) => operation.item === item.name)
+        .filter((operation) => 'item' in operation && operation.item === item.name)
         .map((operation) => operation.name),
     );
     for (const operation of data.operations.filter((operation) => affected.has(operation.name)))
@@ -123,7 +129,7 @@ export class Vault {
     const name = parseInput(nameSchema, input);
     const affected = new Set(
       [...this.data().operations, ...this.data().databases]
-        .filter((operation) => operation.item === name)
+        .filter((operation) => 'item' in operation && operation.item === name)
         .map((operation) => operation.name),
     );
     this.abortOperations(affected);
@@ -131,7 +137,9 @@ export class Vault {
       (next) => {
         next.items = next.items.filter((item) => item.name !== name);
         next.operations = next.operations.filter((operation) => operation.item !== name);
-        next.databases = next.databases.filter((database) => database.item !== name);
+        next.databases = next.databases.filter(
+          (database) => database.source === 'snapshot' || database.item !== name,
+        );
         next.grants = next.grants.filter((grant) => !affected.has(grant.operation));
       },
       'deleted',
@@ -192,7 +200,12 @@ export class Vault {
     return { state: 'awaiting-approval', operation };
   }
   // Desktop IPC requires the displayed revision. Direct in-process callers are trusted.
-  approve(input: unknown, durationInput: unknown, reviewedRevision?: string): void {
+  approve(
+    input: unknown,
+    durationInput: unknown,
+    reviewedRevision?: string,
+    dataSharingAccepted?: unknown,
+  ): void {
     const operation = parseInput(nameSchema, input);
     const duration = parseInput(durationSchema, durationInput);
     if (
@@ -203,6 +216,11 @@ export class Vault {
       throw new SafeError('Unknown operation or database connection.');
     if (reviewedRevision !== undefined && reviewedRevision !== this.policyRevision(operation))
       throw new SafeError('Access settings changed. Review the updated policy before approving.');
+    const database = this.data().databases.some((entry) => entry.name === operation);
+    if (database && dataSharingAccepted !== true)
+      throw new SafeError(
+        'Explicit data-sharing consent is required before approving database access.',
+      );
     this.mutate(
       (next) => {
         next.grants = [
@@ -216,6 +234,7 @@ export class Vault {
                   ? Date.now() + 86_400_000
                   : null,
             remainingUses: duration === 'once' ? 1 : null,
+            ...(database ? { dataSharingAccepted: true as const } : {}),
           },
         ];
       },
@@ -288,26 +307,28 @@ export class Vault {
       this.#active.delete(controller);
     }
   }
-  registerSQLite(name: string, path: string, tables: DatabaseTable[]): void {
-    const item = parseInput(itemSchema, {
-      name: `sqlite-source-${randomUUID()}`,
-      kind: 'secret',
-      fields: [{ name: 'value', value: path }],
-    });
-    const database = parseInput(databaseSchema, {
-      engine: 'sqlite',
-      name,
-      item: item.name,
-      field: 'value',
-      tables,
-    });
-    if (this.data().operations.some((operation) => operation.name === database.name))
+  registerSQLite(name: string, bytes: Buffer, tables: DatabaseTable[]): void {
+    const parsedName = parseInput(nameSchema, name);
+    const parsedTables = parseInput(databaseTablesSchema, tables);
+    const data = this.data();
+    if (data.operations.some((operation) => operation.name === parsedName))
       throw new SafeError('API operations and database connections must have different names.');
-    databaseSecret(database, item);
+    if (data.databases.length >= 64 && !data.databases.some((entry) => entry.name === parsedName))
+      throw new SafeError('The database connection limit has been reached.');
+    // Write ciphertext first. An interrupted/ambiguous vault commit may leave an encrypted orphan,
+    // never a live reference to unwritten data or a decrypted database on disk.
+    const snapshot = saveSQLiteSnapshot(this.storage.directory, bytes);
+    const database = parseInput(databaseSchema, {
+      source: 'snapshot',
+      engine: 'sqlite',
+      snapshot: snapshot.id,
+      name: parsedName,
+      tables: parsedTables,
+    });
     this.abortOperations(new Set([database.name]));
     this.mutate(
       (next) => {
-        next.items.push(item);
+        next.snapshots.push(snapshot);
         next.databases = [
           ...next.databases.filter((entry) => entry.name !== database.name),
           database,
@@ -325,9 +346,24 @@ export class Vault {
     const data = this.data();
     if (data.operations.some((entry) => entry.name === database.name))
       throw new SafeError('API operations and database connections must have different names.');
-    const item = data.items.find((entry) => entry.name === database.item);
-    if (!item) throw new SafeError('Choose an existing vault item.');
-    databaseSecret(database, item);
+    if (database.source === 'snapshot') {
+      const existing = data.databases.find((entry) => entry.name === database.name);
+      if (existing?.source !== 'snapshot' || existing.snapshot !== database.snapshot)
+        throw new SafeError('Import a SQLite snapshot through the desktop setup.');
+      if (
+        database.tables.some((table) => {
+          const previous = existing.tables.find(
+            (entry) => entry.schema === table.schema && entry.table === table.table,
+          );
+          return !previous || table.columns.some((column) => !previous.columns.includes(column));
+        })
+      )
+        throw new SafeError('Re-import the SQLite file to allow additional tables or columns.');
+    } else {
+      const item = data.items.find((entry) => entry.name === database.item);
+      if (!item) throw new SafeError('Choose an existing vault item.');
+      databaseSecret(database, item);
+    }
     this.abortOperations(new Set([database.name]));
     this.mutate(
       (next) => {
@@ -353,8 +389,17 @@ export class Vault {
       );
     if (this.#active.size >= 8) throw new SafeError('Too many active requests.');
     readStatement(database, query);
-    const item = this.data().items.find((entry) => entry.name === database.item)!;
-    const secret = databaseSecret(database, item);
+    const snapshot =
+      database.source === 'snapshot'
+        ? this.data().snapshots.find((entry) => entry.id === database.snapshot)
+        : undefined;
+    const secret =
+      database.source === 'snapshot'
+        ? undefined
+        : databaseSecret(
+            database,
+            this.data().items.find((entry) => entry.name === database.item)!,
+          );
     this.mutate(
       (next) => {
         next.grants = next.grants.filter(
@@ -366,8 +411,17 @@ export class Vault {
     );
     const controller = new AbortController();
     this.#active.set(controller, database.name);
+    let bytes: Buffer | undefined;
     try {
-      const result = await this.read(structuredClone(database), secret, query, controller.signal);
+      let result: DatabaseResult;
+      if (database.source === 'snapshot') {
+        if (!snapshot) throw new SafeError('Missing SQLite import.');
+        bytes = await loadSQLiteSnapshot(this.storage.directory, snapshot, controller.signal);
+        result = await readSQLiteBytes(bytes, database, query, controller.signal);
+      } else {
+        if (!secret) throw new SafeError('Missing database source.');
+        result = await this.read(structuredClone(database), secret, query, controller.signal);
+      }
       if (controller.signal.aborted || !this.#data)
         throw new SafeError('Database access ended during the read. No rows were returned.');
       this.mutate(() => {}, 'finished', database.name);
@@ -378,6 +432,7 @@ export class Vault {
         'Database read failed or access ended. No database error details were returned.',
       );
     } finally {
+      bytes?.fill(0);
       this.#active.delete(controller);
     }
   }
@@ -408,9 +463,13 @@ export class Vault {
     return this.#data;
   }
   private hasGrant(operation: string): boolean {
-    return this.data().grants.some(
+    const data = this.data();
+    const database = data.databases.some((entry) => entry.name === operation);
+    return data.grants.some(
       (grant) =>
-        grant.operation === operation && (grant.expiresAt === null || grant.expiresAt > Date.now()),
+        grant.operation === operation &&
+        (grant.expiresAt === null || grant.expiresAt > Date.now()) &&
+        (!database || grant.dataSharingAccepted === true),
     );
   }
   private abortOperations(names: Set<string>): void {
@@ -424,6 +483,11 @@ export class Vault {
   ): void {
     const next = structuredClone(this.data());
     change(next);
+    next.snapshots = next.snapshots.filter((snapshot) =>
+      next.databases.some(
+        (database) => database.source === 'snapshot' && database.snapshot === snapshot.id,
+      ),
+    );
     next.audit = [
       { at: Date.now(), event, name, ...(status === undefined ? {} : { status }) },
       ...next.audit,

@@ -73,7 +73,7 @@ test(
       body: '',
     });
     vault.approve('http-test', 'until-revoked');
-    vault.approve('fixture-db', 'until-revoked');
+    vault.approve('fixture-db', 'until-revoked', undefined, true);
     const regular = await startBroker(vault);
     const broker = await startDatabaseBroker(vault);
     const query = {

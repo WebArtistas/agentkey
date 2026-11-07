@@ -352,7 +352,7 @@
                 [selection]="selection"
                 [busy]="busy()"
                 (save)="saveSQLite($event)"
-                (cancel)="sqliteSelection.set(null)"
+                (cancel)="cancelSQLite()"
               />
             }
             @if (editingDatabase()) {
@@ -382,9 +382,21 @@
                   </div>
                 </div>
                 <p>
-                  {{ database.engine === 'sqlite' ? 'SQLite file reference' : 'PostgreSQL URL' }}
-                  from <code>{{ database.item }}.{{ database.field }}</code
-                  >. The saved source value is never returned.
+                  @if (database.source === 'snapshot') {
+                    Encrypted managed SQLite snapshot. Re-import the original file to refresh data.
+                  } @else {
+                    {{
+                      database.engine === 'sqlite'
+                        ? 'External SQLite file — not encrypted by AgentKey'
+                        : 'PostgreSQL URL'
+                    }}
+                    from <code>{{ database.item }}.{{ database.field }}</code
+                    >. The saved source value is never returned.
+                    @if (database.engine === 'sqlite') {
+                      Re-import with this connection name to create an encrypted snapshot. The
+                      original file stays unchanged.
+                    }
+                  }
                 </p>
                 @for (table of database.tables; track $index) {
                   <p class="mono">
@@ -495,13 +507,14 @@
                 }
               </article>
             }
-            @for (database of snapshot()!.databases; track database.name) {
+            @for (database of snapshot()!.databases; track database.name; let index = $index) {
               <article class="operation-row">
                 <h2>{{ database.name }}</h2>
                 <p class="notice">
                   Read-only {{ database.engine === 'sqlite' ? 'SQLite' : 'PostgreSQL' }}. These
-                  columns may be returned to the agent and its model provider. Credentials stay in
-                  AgentKey.
+                  columns may be returned to connected agents, which may send them to any model
+                  provider or other service. AgentKey cannot verify or restrict that destination.
+                  Credentials stay in AgentKey. Revoking access cannot recall data already returned.
                 </p>
                 @for (table of database.tables; track $index) {
                   <p class="mono">
@@ -531,10 +544,20 @@
                     </button>
                   </div>
                 } @else {
+                  <label class="sharing-consent">
+                    <input
+                      tuiCheckbox
+                      type="checkbox"
+                      [formField]="sharingForm.reviews[index].accepted"
+                      (change)="acceptDataSharing(database.revision, $event)"
+                    />
+                    I consent to sharing the listed data for {{ database.name }} with connected
+                    agents and their providers for the selected approval duration.
+                  </label>
                   <button
                     tuiButton
                     size="m"
-                    [disabled]="busy()"
+                    [disabled]="busy() || !sharingAccepted(database.revision)"
                     (click)="approve(database.name, database.revision)"
                   >
                     Approve {{ database.name }}
@@ -586,23 +609,6 @@
                 </h1>
               </div>
             </div>
-            @if (isolatedDirectory()) {
-              <h2>Isolated Pi database mode — Linux</h2>
-              <p>
-                Build the runner with <code>pnpm sandbox:build</code>, then use
-                <code>pnpm sandbox:pi</code> with the setup in README.md. This fresh broker
-                directory is the only AgentKey directory the container may receive:
-              </p>
-              <pre class="config" aria-label="Isolated broker directory">{{
-                isolatedDirectory()
-              }}</pre>
-              <p class="notice">
-                Never mount the vault directory, home directory or Docker socket into an agent. The
-                isolated runner has no external network or shell tools. Provider authentication
-                stays on the host; approved database results still enter model context. The
-                directory changes when AgentKey restarts.
-              </p>
-            }
             <h2>Standard MCP — trusted local clients</h2>
             <p class="intro">
               Use this stdio MCP configuration in a compatible client. Client config formats vary;
@@ -619,9 +625,11 @@
               </li>
             </ol>
             <p class="notice">
-              This standard connection does not isolate an agent with access to your OS account. No
-              credentials belong in MCP configuration, chat or prompts. The source build requires
-              Node.js on PATH. The desktop app stays running in the tray when its window closes.
+              AgentKey is a credential broker, not an agent manager. Run and isolate your agents
+              yourself; Docker and a special agent runner are not required. This MCP connection is
+              not OS isolation. No credentials belong in client configuration, chat or prompts. The
+              packaged adapter includes its runtime. Only source builds need a supported Node.js on
+              PATH. Closing the window leaves AgentKey running in the tray.
             </p>
             <p class="hint">
               Bundled usage skill: <code>skills/agentkey/SKILL.md</code>. No browser autofill,

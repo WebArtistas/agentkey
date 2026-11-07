@@ -5,11 +5,10 @@ import { databaseReadSchema, databaseSchema, sqlIdentifierSchema } from './datab
 import type { DatabaseTable } from '../shared/contracts';
 
 const requestSchema = z.discriminatedUnion('mode', [
-  z.strictObject({ mode: z.literal('demo'), path: z.string().max(8192) }),
-  z.strictObject({ mode: z.literal('inspect'), path: z.string().max(8192) }),
+  z.strictObject({ mode: z.literal('demo') }),
+  z.strictObject({ mode: z.literal('inspect') }),
   z.strictObject({
     mode: z.literal('read'),
-    path: z.string().max(8192),
     database: databaseSchema,
     query: databaseReadSchema,
   }),
@@ -39,14 +38,21 @@ function catalog(db: DatabaseSync): DatabaseTable[] {
   return tables.sort((a, b) => a.table.localeCompare(b.table));
 }
 async function main(): Promise<void> {
-  let input = '';
+  const chunks: Buffer[] = [];
+  let length = 0;
   for await (const chunk of process.stdin) {
-    input += String(chunk);
-    if (Buffer.byteLength(input) > 64 * 1024) throw new Error();
+    if (!Buffer.isBuffer(chunk)) throw new Error();
+    length += chunk.length;
+    if (length > 16 * 1024 * 1024 + 64 * 1024) throw new Error();
+    chunks.push(chunk);
   }
-  const request = requestSchema.parse(JSON.parse(input));
-  const db = new DatabaseSync(request.path, {
-    readOnly: request.mode !== 'demo',
+  const input = Buffer.concat(chunks);
+  for (const chunk of chunks) chunk.fill(0);
+  const separator = input.indexOf(10);
+  if (separator < 0 || separator > 64 * 1024) throw new Error();
+  const request = requestSchema.parse(JSON.parse(input.subarray(0, separator).toString('utf8')));
+  const bytes = input.subarray(separator + 1);
+  const db = new DatabaseSync(':memory:', {
     defensive: true,
     allowExtension: false,
     enableDoubleQuotedStringLiterals: false,
@@ -63,9 +69,19 @@ async function main(): Promise<void> {
       db.exec(
         "CREATE TABLE products(id INTEGER PRIMARY KEY, name TEXT NOT NULL, internal_note TEXT); INSERT INTO products VALUES (1,'Notebook','Synthetic private note'),(2,'Desk lamp','Synthetic private note'),(3,'Pen set','Synthetic private note');",
       );
-      process.stdout.write(JSON.stringify({ ok: true }));
+      if (bytes.length) throw new Error();
+      process.stdout.write(db.serialize());
       return;
     }
+    if (
+      bytes.length < 100 ||
+      bytes.length > 16 * 1024 * 1024 ||
+      bytes.subarray(0, 16).toString('binary') !== 'SQLite format 3\0' ||
+      bytes[18] !== 1 ||
+      bytes[19] !== 1
+    )
+      throw new Error();
+    db.deserialize(bytes);
     db.exec('PRAGMA query_only=ON');
     const tables = catalog(db);
     if (request.mode === 'inspect') {
@@ -114,7 +130,7 @@ async function main(): Promise<void> {
     );
     statement.setReadBigInts(true);
     const rows = [];
-    let bytes = 0;
+    let outputBytes = 0;
     for (const row of statement.iterate(...values)) {
       const cells = query.columns.map((column) => {
         const value = row[column];
@@ -124,8 +140,8 @@ async function main(): Promise<void> {
         if (Buffer.byteLength(text) > 4096) throw new Error();
         return text;
       });
-      bytes += Buffer.byteLength(JSON.stringify(cells));
-      if (bytes > 250 * 1024) throw new Error();
+      outputBytes += Buffer.byteLength(JSON.stringify(cells));
+      if (outputBytes > 250 * 1024) throw new Error();
       rows.push(cells);
     }
     process.stdout.write(
@@ -138,6 +154,7 @@ async function main(): Promise<void> {
     );
   } finally {
     db.close();
+    input.fill(0);
   }
 }
 void main().catch(() => {

@@ -1,39 +1,45 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { z } from 'zod';
 import type { SQLiteSelection } from '../shared/contracts';
-import { databaseSchema } from './database-schema';
+import { databaseTablesSchema } from './database-schema';
 import { nameSchema, parseInput, SafeError } from './schema';
-import { createSQLiteDemo, inspectSQLite } from './sqlite';
+import { createSQLiteDemo, inspectSQLiteBytes, readSQLiteFile } from './sqlite';
 import type { Vault } from './vault';
 
 export class SQLiteSetup {
   #token = '';
-  #selection:
-    { public: SQLiteSelection; path: string; session: number; demoDirectory?: string } | undefined;
+  #controller: AbortController | undefined;
+  #selection: { public: SQLiteSelection; bytes: Buffer; session: number } | undefined;
   constructor(private readonly vault: Vault) {}
   clear(): void {
     this.#token = '';
-    const directory = this.#selection?.demoDirectory;
+    this.#controller?.abort();
+    this.#controller = undefined;
+    this.#selection?.bytes.fill(0);
     this.#selection = undefined;
-    if (directory) void rm(directory, { recursive: true, force: true }).catch(() => {});
+  }
+  cancel(input: unknown): void {
+    const token = parseInput(z.uuid(), input);
+    // Other views and delayed requests must not discard a newer reviewed import.
+    if (this.#token === token) this.clear();
   }
   async prepare(file?: string): Promise<SQLiteSelection> {
     const session = this.vault.sessionRevision;
     this.clear();
     const token = randomUUID();
     this.#token = token;
-    let demoDirectory: string | undefined;
+    const controller = new AbortController();
+    this.#controller = controller;
+    let bytes: Buffer | undefined;
     let retained = false;
     try {
-      let path: string;
-      if (file) path = await realpath(file);
-      else {
-        demoDirectory = await mkdtemp(join(this.vault.storage.directory, 'sqlite-demo-'));
-        path = await createSQLiteDemo(demoDirectory);
-      }
-      const tables = await inspectSQLite(path);
+      const path = file ? await realpath(file) : undefined;
+      bytes = path
+        ? await readSQLiteFile(path, controller.signal)
+        : await createSQLiteDemo(controller.signal);
+      const tables = await inspectSQLiteBytes(bytes, controller.signal);
       if (!tables.length)
         throw new SafeError(
           'No supported ordinary tables were found. Views, virtual/generated columns and unsupported identifiers are excluded.',
@@ -42,20 +48,21 @@ export class SQLiteSetup {
         throw new SafeError('SQLite selection expired. Choose the file again.');
       const selection: SQLiteSelection = {
         token,
-        label: file ? basename(path) : 'Synthetic products demo',
+        label: path ? basename(path) : 'Synthetic products demo',
         demo: !file,
         tables,
       };
-      this.#selection = { public: selection, path, session, demoDirectory };
+      this.#selection = { public: selection, bytes, session };
       retained = true;
       return structuredClone(selection);
     } finally {
-      if (!retained && demoDirectory) await rm(demoDirectory, { recursive: true, force: true });
+      if (!retained) bytes?.fill(0);
+      if (this.#controller === controller) this.#controller = undefined;
     }
   }
   save(input: unknown): void {
     const parsed = parseInput(
-      z.strictObject({ token: z.uuid(), name: nameSchema, tables: databaseSchema.shape.tables }),
+      z.strictObject({ token: z.uuid(), name: nameSchema, tables: databaseTablesSchema }),
       input,
     );
     const selection = this.#selection;
@@ -72,8 +79,11 @@ export class SQLiteSetup {
       if (!offered || table.columns.some((column) => !offered.columns.includes(column)))
         throw new SafeError('Choose only inspected tables and columns.');
     }
-    this.vault.registerSQLite(parsed.name, selection.path, parsed.tables);
-    this.#selection = undefined;
-    this.#token = '';
+    try {
+      this.vault.registerSQLite(parsed.name, selection.bytes, parsed.tables);
+    } finally {
+      if (!this.vault.storage.unlocked) this.clear();
+    }
+    this.clear();
   }
 }

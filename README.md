@@ -14,14 +14,16 @@ AgentKey is an Apache-2.0 desktop vault with a local stdio MCP server and CLI. Y
 - Exact saved API operations: public HTTPS on port 443, fixed method/URL/JSON body, secret header bindings or HTTP Basic authentication.
 - One-attempt, one-hour, one-day and until-revoked approvals. Repeated tasks work while the app is running and unlocked.
 - A bounded encrypted activity log, revocation and automatic grant invalidation when values or operations change.
-- Guided SQLite demo/file selection and constrained local PostgreSQL reads, with explicit column permissions.
+- Encrypted managed SQLite snapshots and constrained local PostgreSQL reads, with explicit column permissions and human data-sharing consent.
 - Seven MCP tools and a portable [agent usage skill](skills/agentkey/SKILL.md).
+
+AgentKey is a credential broker, not an agent runtime or manager. Users choose, run and isolate their agents. Standard MCP requires neither Docker nor an AgentKey-specific runner.
 
 No raw-secret getter, arbitrary command execution, browser autofill, cloud synchronization, mobile/iOS app, built-in scheduler or account recovery is included. A Login item can authenticate a supported API using HTTP Basic; it does not fill website forms.
 
 ## Run from source
 
-Use Node.js **26.13.0 LTS** (see `.nvmrc`) and **pnpm 12.16.1**. Node 24.15+ is also accepted by the dependency stack. Angular 22 requires TypeScript 6.0.x, so this project deliberately does not use TypeScript 7.
+Use Node.js **26.13.0 LTS** (see `.nvmrc`) and **pnpm 12.16.1**. `pnpm install` installs the pinned project-local Node runtime recorded in the lockfile; it does not replace the system Node installation. SQLite's in-memory import API requires Node 24.16+ or the pinned 26.13 runtime. Angular 22 requires TypeScript 6.0.x, so this project deliberately does not use TypeScript 7.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -55,14 +57,18 @@ Replacing an existing item/operation name replaces its definition and revokes as
 
 1. Create/unlock the vault, open **Databases**, and choose **Try SQLite demo**.
 2. Review the synthetic `products` table. Only `id` and `name` are preselected; `internal_note` stays excluded. Save as `local-demo` or choose another non-sensitive name.
-3. Request access from the agent, then approve the named connection in **Approvals**. Saving a policy does not grant access.
+3. Request access from the agent, review the columns and sharing notice in **Approvals**, explicitly accept data sharing, then approve the named connection. Saving an import does not grant access.
 4. A structured read uses schema `main`, table `products`, columns `["id", "name"]` and a limit up to 100. No password or server administration is needed.
 
-**Choose SQLite file** opens a native file picker and inspects schema metadata in the trusted desktop flow. No columns are preselected for your files. Use a closed, exported standalone copy up to 16 MiB: files with WAL/SHM/journal sidecars are rejected. Supported names use ASCII letters/digits/underscores, starting with a letter or underscore. Views, virtual/shadow tables and tables containing generated columns are excluded. Inspection is limited to 128 ordinary tables and 64 columns per table; a saved policy permits at most 32 tables and 16 columns per table.
+**Choose SQLite file** opens a native file picker and inspects schema metadata in the trusted desktop flow. No columns are preselected for your files. Use a closed, exported standalone copy up to 16 MiB: WAL-mode images and files with WAL/SHM/journal sidecars are rejected. Supported names use ASCII letters/digits/underscores, starting with a letter or underscore. Views, virtual/shadow tables and tables containing generated columns are excluded. Inspection is limited to 128 ordinary tables and 64 columns per table; a saved policy permits at most 32 tables and 16 columns per table.
 
-AgentKey stores the source path as an encrypted vault reference, never in agent metadata. It reads a private temporary copy, not the original, and does not modify or encrypt the selected file. Keep that file in a private location. Moving/deleting it breaks the connection; deleting a policy does not delete the source file. Synthetic demo files are kept beside the vault in their own private directories.
+AgentKey imports the **entire database** into an encrypted snapshot; the column policy limits what agents can read, not which bytes are imported. Each snapshot has a separate random encryption key stored inside the encrypted vault. Inspection and reads use an in-memory SQLite worker, not a decrypted temporary database file. Demo databases are also created in memory and saved encrypted.
 
-Reads permit only selected columns and AND-equality filters; results are unordered text/null, limited to 100 rows, 4 KiB per cell and 256 KiB per response. BLOBs and oversized results fail closed. **Approved rows can enter the model provider's context. Local SQLite does not mean local inference.** Standard MCP also does not isolate an unrestricted host agent. The experimental Linux Pi runner requires its own passing preflight; this setup neither installs an AppArmor policy nor falls back to non-isolated Pi.
+The original file is unchanged and **not encrypted by AgentKey**. Changes to it do not refresh the snapshot, and moving/deleting it does not break the managed connection. To refresh data or allow additional columns, choose the file again and reuse the connection name. The bytes inspected are the bytes saved, even if the original changes during review. Re-importing replaces the policy and revokes its approval. Existing columns can be narrowed through **Edit policy**.
+
+Older file-reference connections remain external and visibly labelled **not encrypted by AgentKey**. They are not silently converted or deleted; re-import explicitly to replace one with a managed snapshot. Old database grants without sharing consent are ignored and must be approved again. API grants are unaffected. Keep original exports and old demo directories private. Encrypted orphan snapshot files may remain after replacement, deletion or interrupted persistence; automatic garbage collection is not implemented.
+
+Reads permit only selected columns and AND-equality filters; results are unordered text/null, limited to 100 rows, 4 KiB per cell and 256 KiB per response. BLOBs and oversized results fail closed. **Approved rows can enter a model provider's context. Local SQLite does not mean local inference.** Consent authorizes sharing the listed data with connected agents for the selected grant duration. AgentKey cannot verify or restrict an external agent's provider or later use of returned data. Revocation cannot recall rows already returned. Ordinary MCP is not OS isolation; that remains the user's responsibility.
 
 PostgreSQL remains available through **Add database**, using a saved loopback URL and a dedicated restricted read-only role.
 
@@ -98,7 +104,9 @@ One stdio MCP server serves all compatible clients; separate vendor-specific ser
 
 This is a common configuration shape, not a universal client schema. VS Code uses a `servers` map; clients such as Codex use their own TOML configuration. Pi accepts this `mcpServers` block in its approved project MCP configuration. Follow your installed client's documentation, use absolute paths and restart its MCP connection. Never put a vault passphrase or secret values into client configuration.
 
-Packaged builds use the AgentKey executable with `--mcp --data-dir ...` instead of an external Node process. The desktop panel generates the appropriate command. The desktop vault must already be running. The adapter never launches or unlocks it automatically.
+Packaged builds use the AgentKey executable as the bundled Node runtime: the generated configuration includes `env: { "ELECTRON_RUN_AS_NODE": "1" }` and the absolute `resources/app.asar/dist/agent/cli.js` path, followed by `mcp --data-dir ...`. Copy the complete configuration from the desktop panel; paths differ by platform. No external Node installation or display server is needed for this adapter. The old desktop `--mcp` entry point is retired—replace old client configurations rather than adding display or sandbox-bypass flags.
+
+The runtime flag belongs only to the adapter's MCP configuration; do not set it globally or on desktop launches. The desktop's renderer sandbox remains enabled. The adapter can start and advertise its tools while AgentKey is closed, but operations require the desktop vault to be running and unlocked. It never launches or unlocks the vault automatically.
 
 Tools:
 
@@ -129,7 +137,7 @@ A one-attempt grant is consumed **before sending**, including failures. Network 
 
 Read [SECURITY.md](SECURITY.md) before using real credentials.
 
-**This protects against accidental disclosure to the model, not a hostile program running as your OS user.** Local clients share the same approval scope. Client names are not authenticated identities. Agents with unrestricted shell, filesystem, debugger or desktop-control access are outside this boundary. The experimental Linux Pi runner provides a separate container launch path with a fail-closed preflight, but ordinary MCP configuration does not activate it. Host compatibility, real database integration and live-provider execution need separate verification; do not disable host protections to bypass a failed check.
+**This protects against accidental disclosure to the model, not a hostile program running as your OS user.** Local clients share the same approval scope. Client names are not authenticated identities. Agents with unrestricted shell, filesystem, debugger or desktop-control access are outside this boundary. AgentKey does not launch agents or install host security policies. Use your own isolation where needed, and do not disable host protections to connect a client.
 
 The destination API necessarily receives the real credential. Only approve endpoints you trust. Status-only responses avoid the common credential-echo problem, but they are not a proof against a malicious endpoint or covert channels.
 
@@ -150,11 +158,15 @@ The CI workflow targets Linux, Windows and macOS. Adding a workflow is not evide
 
 Runtime code is in `core/` (vault, policy and networking), `agent/` (MCP/CLI), `desktop/` (Electron trust boundary), `shared/` (contracts), and `src/` (Angular/Taiga UI). Tests live in `tests/` and `e2e/`.
 
+Historical isolated-runner experiments remain under `integrations/pi/` for separate development, not normal setup. The desktop no longer starts or advertises their database-only broker export. Standard MCP remains supported; `pnpm test:pi` includes synthetic SDK checks and native MCP discovery without running a model or Docker.
+
 Keep changes small, add regression tests at security boundaries, and never use real credentials in tests, screenshots or issues. `pnpm-lock.yaml` pins dependencies; the two stable `@emnapi` overrides avoid an incompatible optional upstream WASM peer resolution.
 
 ## Backup and recovery
 
-Quit AgentKey and back up `vault.json` from the private data directory. The file contains encrypted items, operations, grants and recent audit entries. To restore, quit the app and restore the file to a private AgentKey data directory, then unlock with the original passphrase. SQLite source files are separate: back up any selected exports and saved `sqlite-demo-*` directories too, retaining their location or selecting them again after restoration. `vault.json` encrypts their references, not their contents. Do not copy `agent-connection.json` or socket files. Old backups can restore old approvals, so review/revoke grants after restoring. No master-passphrase change UI is included yet.
+Quit AgentKey and back up **both `vault.json` and the complete `sqlite-snapshots/` directory** from the private data directory. The vault contains encrypted items, policies, grants, snapshot keys and recent audit entries; `.aks` files contain encrypted database snapshots. Either part alone is insufficient to recover managed imports. Restore both together into a private AgentKey data directory with the app stopped, then unlock with the original passphrase. Older external SQLite connections still require their separately managed source files or an explicit re-import. Do not copy `agent-connection.json` or socket files.
+
+Old backups can restore old approvals, including previously accepted sharing consent: review/revoke grants after restoring. Restore hardening, a backup/restore UI and master-passphrase changes are subsequent work, not implemented here. Older app versions cannot read the new snapshot metadata; retain a complete backup before upgrading and do not downgrade a changed vault.
 
 ## License
 

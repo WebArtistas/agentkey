@@ -130,7 +130,7 @@ test('stale desktop reviews cannot approve changed policies, rotated secrets or 
     assert.throws(() => vault.approve(database.name, 'day', old), /settings changed/);
     assert.equal(vault.snapshot().grants.length, 0);
     const current = revision();
-    vault.approve(database.name, 'once', current);
+    vault.approve(database.name, 'once', current, true);
     assert.throws(() => vault.approve(database.name, 'day', current), /settings changed/);
     vault.revoke(database.name);
   }
@@ -158,7 +158,7 @@ test('database reads require approval and atomically consume once before I/O', a
   await assert.rejects(vault.readRows(query), /Approval required/);
   assert.equal(reads, 0);
   assert.equal(vault.requestAccess(database.name).state, 'awaiting-approval');
-  vault.approve(database.name, 'once');
+  vault.approve(database.name, 'once', undefined, true);
   const results = await Promise.allSettled([vault.readRows(query), vault.readRows(query)]);
   assert.equal(reads, 1);
   assert.ok(results.every((result) => result.status === 'rejected'));
@@ -168,18 +168,18 @@ test('database reads require approval and atomically consume once before I/O', a
 });
 test('database edits, rotation, deletion and expiry invalidate access', async (t) => {
   const vault = fixture(t);
-  vault.approve(database.name, 'until-revoked');
+  vault.approve(database.name, 'until-revoked', undefined, true);
   assert.deepEqual((await vault.readRows(query)).rows, [['1', 'Notebook']]);
   vault.saveDatabase(database);
   await assert.rejects(vault.readRows(query), /Approval required/);
-  vault.approve(database.name, 'hour');
+  vault.approve(database.name, 'hour', undefined, true);
   vault.saveItem({
     name: database.item,
     kind: 'secret',
     fields: [{ name: 'value', value: secret }],
   });
   await assert.rejects(vault.readRows(query), /Approval required/);
-  vault.approve(database.name, 'hour');
+  vault.approve(database.name, 'hour', undefined, true);
   const now = Date.now();
   t.mock.method(Date, 'now', () => now + 3_600_001);
   await assert.rejects(vault.readRows(query), /Approval required/);
@@ -196,11 +196,11 @@ test('revocation aborts database reads and suppresses late rows even after reapp
       finish = resolve;
     });
   });
-  vault.approve(database.name, 'until-revoked');
+  vault.approve(database.name, 'until-revoked', undefined, true);
   const pending = vault.readRows(query);
   vault.revoke(database.name);
   assert.equal(signal.aborted, true);
-  vault.approve(database.name, 'until-revoked');
+  vault.approve(database.name, 'until-revoked', undefined, true);
   finish({
     connection: query.connection,
     columns: query.columns,

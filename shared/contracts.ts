@@ -43,16 +43,11 @@ export interface DatabaseTable {
   table: string;
   columns: string[];
 }
-export interface DatabaseInput {
-  engine?: 'postgres' | 'sqlite';
-  name: string;
-  item: string;
-  field: string;
-  tables: DatabaseTable[];
-}
-export interface DatabaseSummary extends DatabaseInput {
-  revision: string;
-}
+export type DatabaseInput = { name: string; tables: DatabaseTable[] } & (
+  | { source: 'snapshot'; engine: 'sqlite'; snapshot: string }
+  | { source?: 'item'; engine?: 'postgres' | 'sqlite'; item: string; field: string }
+);
+export type DatabaseSummary = DatabaseInput & { revision: string };
 // Desktop-only setup metadata. The agent never receives the selection token or file path.
 export interface SQLiteSelection {
   token: string;
@@ -84,6 +79,7 @@ export interface GrantSummary {
   operation: string;
   expiresAt: number | null;
   remainingUses: number | null;
+  dataSharingAccepted?: true;
 }
 export interface PendingSummary {
   operation: string;
@@ -126,12 +122,23 @@ export interface DesktopApi {
   saveDatabase(database: DatabaseInput): Promise<Result<void>>;
   prepareSQLite(source: 'demo' | 'file'): Promise<Result<SQLiteSelection | null>>;
   saveSQLite(input: SQLiteSetupInput): Promise<Result<void>>;
-  approve(operation: string, duration: ApprovalDuration, revision: string): Promise<Result<void>>;
+  cancelSQLite(token: string): Promise<Result<void>>;
+  approve(
+    operation: string,
+    duration: ApprovalDuration,
+    revision: string,
+    dataSharingAccepted?: boolean,
+  ): Promise<Result<void>>;
   showWindow(view: 'full' | 'compact'): Promise<Result<void>>;
   hidePanel(): Promise<Result<void>>;
   revoke(operation: string): Promise<Result<void>>;
   connection(): Promise<
-    Result<{ dataDirectory: string; command: string; args: string[]; isolatedDirectory?: string }>
+    Result<{
+      dataDirectory: string;
+      command: string;
+      args: string[];
+      env?: Record<string, string>;
+    }>
   >;
 }
 export interface RunResult {

@@ -59,6 +59,8 @@ export function databaseConfig(value: string): ClientConfig {
   }
 }
 export function databaseSecret(database: DatabaseInput, item: ItemInput): string {
+  if (database.source === 'snapshot')
+    throw new SafeError('Managed SQLite imports do not use vault item fields.');
   const value = item.fields.find((field) => field.name === database.field)?.value;
   if (!value) throw new SafeError('Choose an existing database source field.');
   if (database.engine === 'sqlite') {

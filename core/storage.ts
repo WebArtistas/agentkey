@@ -26,7 +26,7 @@ const envelopeSchema = z.strictObject({
     .max(MAX_FILE_SIZE)
     .regex(/^[A-Za-z0-9+/]*={0,2}$/),
 });
-export function atomicWrite(path: string, content: string): void {
+export function atomicWrite(path: string, content: string | Uint8Array): void {
   const temporary = `${path}.${randomBytes(12).toString('hex')}.tmp`;
   let fd: number | undefined;
   try {

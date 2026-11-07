@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { form, FormField, maxLength, required } from '@angular/forms/signals';
-import { TuiButton, TuiInput, TuiRoot } from '@taiga-ui/core';
+import { Component, computed, DestroyRef, inject, linkedSignal, signal } from '@angular/core';
+import { disabled, form, FormField, maxLength, required } from '@angular/forms/signals';
+import { TuiButton, TuiCheckbox, TuiInput, TuiRoot } from '@taiga-ui/core';
 import { TuiDataListWrapper, TuiSelect } from '@taiga-ui/kit';
 import type {
   ApprovalDuration,
@@ -35,6 +35,7 @@ type Page = 'vault' | 'operations' | 'databases' | 'access' | 'activity' | 'conn
     FormField,
     TuiRoot,
     TuiButton,
+    TuiCheckbox,
     TuiInput,
     TuiSelect,
     TuiDataListWrapper,
@@ -64,7 +65,6 @@ export class App {
   protected readonly sqliteSelection = signal<SQLiteSelection | null>(null);
   protected readonly deleting = signal('');
   protected readonly connection = signal('');
-  protected readonly isolatedDirectory = signal('');
   protected readonly authModel = signal({ password: '', confirmation: '' });
   protected readonly authForm = form(this.authModel, (path) => {
     required(path.password);
@@ -73,6 +73,17 @@ export class App {
   });
   protected readonly approvalModel = signal<{ duration: ApprovalDuration }>({ duration: 'once' });
   protected readonly approvalForm = form(this.approvalModel);
+  private readonly databaseReviews = computed(
+    () => this.snapshot()?.databases.map((database) => database.revision) ?? [],
+    { equal: (a, b) => a.length === b.length && a.every((revision, i) => revision === b[i]) },
+  );
+  protected readonly sharingModel = linkedSignal(() => {
+    this.approvalModel(); // Changing duration or policy requires a new acknowledgement.
+    return { reviews: this.databaseReviews().map((revision) => ({ revision, accepted: false })) };
+  });
+  protected readonly sharingForm = form(this.sharingModel, (path) => {
+    disabled(path, () => this.busy());
+  });
   protected readonly durations = ['once', 'hour', 'day', 'until-revoked'];
   protected readonly pages: { id: Page; label: string; number: string }[] = [
     { id: 'vault', label: 'Vault', number: '01' },
@@ -96,12 +107,15 @@ export class App {
       .connection()
       .then((result) => {
         if (result.ok) {
-          this.isolatedDirectory.set(result.value.isolatedDirectory ?? '');
           this.connection.set(
             JSON.stringify(
               {
                 mcpServers: {
-                  agentkey: { command: result.value.command, args: result.value.args },
+                  agentkey: {
+                    command: result.value.command,
+                    args: result.value.args,
+                    ...(result.value.env ? { env: result.value.env } : {}),
+                  },
                 },
               },
               null,
@@ -131,6 +145,8 @@ export class App {
     await this.act(() => this.api!.showWindow(view), '');
   }
   protected navigate(page: Page): void {
+    this.clearSharingConsent();
+    void this.cancelSQLite();
     this.page.set(page);
     this.editingItem.set(false);
     this.editingOperation.set(false);
@@ -154,6 +170,7 @@ export class App {
     this.authModel.set({ password: '', confirmation: '' });
   }
   protected async lock(): Promise<void> {
+    this.clearSharingConsent();
     await this.act(() => this.api!.lock(), 'Vault locked.');
   }
   protected newItem(item: ItemSummary | null = null): void {
@@ -188,11 +205,22 @@ export class App {
       return { ok: true, value: undefined };
     }, '');
   }
+  protected async cancelSQLite(): Promise<void> {
+    const selection = this.sqliteSelection();
+    if (!selection) return;
+    this.sqliteSelection.set(null);
+    try {
+      const result = await this.api?.cancelSQLite(selection.token);
+      if (result && !result.ok) this.failure.set(result.error);
+    } catch {
+      this.failure.set('Unable to clear the SQLite selection. Lock the vault to discard it.');
+    }
+  }
   protected async saveSQLite(input: SQLiteSetupInput): Promise<void> {
     if (
       await this.act(
         () => this.api!.saveSQLite(input),
-        'SQLite policy saved. Approve it before an agent reads rows.',
+        'Encrypted SQLite snapshot saved. Consent and approval are required before an agent reads rows.',
       )
     )
       this.sqliteSelection.set(null);
@@ -219,9 +247,30 @@ export class App {
     await this.act(() => this.api!.deleteOperation(name), 'Operation deleted.');
     this.deleting.set('');
   }
+  protected sharingAccepted(revision: string): boolean {
+    return this.sharingModel().reviews.some(
+      (review) => review.revision === revision && review.accepted,
+    );
+  }
+  private clearSharingConsent(): void {
+    this.sharingModel.update((model) => ({
+      reviews: model.reviews.map((review) => ({ ...review, accepted: false })),
+    }));
+  }
+  protected acceptDataSharing(revision: string, event: Event): void {
+    const checked = event.target instanceof HTMLInputElement && event.target.checked;
+    this.sharingModel.update((model) => ({
+      reviews: model.reviews.map((review) => ({
+        ...review,
+        accepted: review.revision === revision && checked,
+      })),
+    }));
+  }
   protected async approve(name: string, revision: string): Promise<void> {
+    const accepted = this.sharingAccepted(revision);
+    this.clearSharingConsent();
     await this.act(
-      () => this.api!.approve(name, this.approvalModel().duration, revision),
+      () => this.api!.approve(name, this.approvalModel().duration, revision, accepted),
       'Approval saved for local clients.',
     );
   }
@@ -239,8 +288,9 @@ export class App {
     try {
       const result = await this.api!.snapshot();
       if (id !== this.refreshId) return;
-      if (result.ok) this.snapshot.set(result.value);
-      else this.failure.set(result.error);
+      if (result.ok) {
+        this.snapshot.set(result.value);
+      } else this.failure.set(result.error);
     } catch {
       this.failure.set('The desktop connection is unavailable.');
     }

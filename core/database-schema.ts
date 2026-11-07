@@ -5,30 +5,40 @@ const schemaName = sqlIdentifierSchema.refine(
   (value) => !value.toLowerCase().startsWith('pg_') && value.toLowerCase() !== 'information_schema',
 );
 const name = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/);
-export const databaseSchema = z.strictObject({
-  engine: z.enum(['postgres', 'sqlite']).optional(),
-  name,
-  item: name,
-  field: name,
-  tables: z
-    .array(
-      z.strictObject({
-        schema: schemaName,
-        table: sqlIdentifierSchema,
-        columns: z
-          .array(sqlIdentifierSchema)
-          .min(1)
-          .max(16)
-          .refine((values) => new Set(values).size === values.length),
-      }),
-    )
-    .min(1)
-    .max(32)
-    .refine(
-      (tables) =>
-        new Set(tables.map((table) => `${table.schema}.${table.table}`)).size === tables.length,
-    ),
-});
+export const databaseTablesSchema = z
+  .array(
+    z.strictObject({
+      schema: schemaName,
+      table: sqlIdentifierSchema,
+      columns: z
+        .array(sqlIdentifierSchema)
+        .min(1)
+        .max(16)
+        .refine((values) => new Set(values).size === values.length),
+    }),
+  )
+  .min(1)
+  .max(32)
+  .refine(
+    (tables) =>
+      new Set(tables.map((table) => `${table.schema}.${table.table}`)).size === tables.length,
+  );
+const policy = { name, tables: databaseTablesSchema };
+export const databaseSchema = z.union([
+  z.strictObject({
+    ...policy,
+    source: z.literal('snapshot'),
+    engine: z.literal('sqlite'),
+    snapshot: z.uuid(),
+  }),
+  z.strictObject({
+    ...policy,
+    source: z.literal('item').optional(),
+    engine: z.enum(['postgres', 'sqlite']).optional(),
+    item: name,
+    field: name,
+  }),
+]);
 export const databaseReadSchema = z.strictObject({
   connection: name,
   schema: schemaName,

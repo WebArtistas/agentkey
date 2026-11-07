@@ -48,7 +48,13 @@ export const grantSchema = z.strictObject({
   operation: nameSchema,
   expiresAt: z.number().int().positive().nullable(),
   remainingUses: z.literal(1).nullable(),
+  dataSharingAccepted: z.literal(true).optional(),
 });
+export const snapshotRecordSchema = z.strictObject({
+  id: z.uuid(),
+  key: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type SnapshotRecord = z.infer<typeof snapshotRecordSchema>;
 const auditSchema = z.strictObject({
   at: z.number().int(),
   event: z.enum([
@@ -69,12 +75,20 @@ export const dataSchema = z
     items: z.array(itemSchema).max(256),
     operations: z.array(operationSchema).max(256),
     databases: z.array(databaseSchema).max(64).default([]),
+    snapshots: z.array(snapshotRecordSchema).max(64).default([]),
     grants: z.array(grantSchema).max(320),
     audit: z.array(auditSchema).max(200),
   })
   .refine((data) => {
     const names = [...data.operations, ...data.databases].map((entry) => entry.name);
-    return new Set(names).size === names.length;
+    return (
+      new Set(names).size === names.length &&
+      new Set(data.snapshots.map((snapshot) => snapshot.id)).size === data.snapshots.length &&
+      data.databases.every(
+        (database) =>
+          database.source !== 'snapshot' || data.snapshots.some((s) => s.id === database.snapshot),
+      )
+    );
   });
 export type VaultData = z.infer<typeof dataSchema>;
 export const agentCommandSchema = z.discriminatedUnion('action', [

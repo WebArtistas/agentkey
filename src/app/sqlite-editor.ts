@@ -37,13 +37,12 @@ import type { SQLiteSelection, SQLiteSetupInput } from '../../shared/contracts';
         No database password or server is needed. Select only columns the agent may read. Approved
         rows may be sent to its model provider; local storage does not make cloud inference private.
       </p>
-      @if (!selection().demo) {
-        <p class="hint">
-          Use a closed, exported copy, up to 16 MiB. AgentKey never writes to the selected file. It
-          remains in its current location and is not encrypted by AgentKey. Only its reference is
-          encrypted in your vault.
-        </p>
-      }
+      <p class="hint">
+        AgentKey saves an encrypted snapshot and reads it in memory. The entire database is
+        imported; only your selected columns may be returned to agents. Original files remain
+        unchanged and unencrypted by AgentKey. Re-import to refresh the snapshot; source changes are
+        not picked up automatically. Use a closed, exported file, up to 16 MiB.
+      </p>
       <tui-textfield [tuiTextfieldCleaner]="false"
         ><label tuiLabel>Connection name</label
         ><input tuiInput [formField]="fields.name" placeholder="local-demo"

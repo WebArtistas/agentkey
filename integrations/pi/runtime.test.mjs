@@ -76,7 +76,7 @@ async function fixture(t) {
 
 test('real Pi SDK uses only whitelisted stdio MCP tools and loads the portable skill', async (t) => {
   const fixtureData = await fixture(t);
-  fixtureData.vault.approve(database.name, 'until-revoked');
+  fixtureData.vault.approve(database.name, 'until-revoked', undefined, true);
   let turn = 0;
   const relay = await startRelay(async (context) => {
     assert.ok(!JSON.stringify(context).includes(secret));

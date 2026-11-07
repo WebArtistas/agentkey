@@ -1,11 +1,11 @@
 import { _electron as electron, expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { callBroker } from '../agent/client';
+import { connectDesktopMcp } from './mcp';
 
 async function checkAccessibility(page: Page): Promise<void> {
   // Electron cannot create axe's analysis tab. No cross-origin frames exist in this app.
@@ -194,7 +194,6 @@ test('database policy, approval and editing never reveal the saved URL', async (
   const page = await application.firstWindow();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  let isolatedDirectory = '';
   try {
     await page
       .getByLabel('Master passphrase', { exact: true })
@@ -229,6 +228,10 @@ test('database policy, approval and editing never reveal the saved URL', async (
     ).toMatchObject({ ok: true, value: { state: 'awaiting-approval' } });
     await page.getByRole('button', { name: '04 Approvals' }).click();
     await expect(page.getByText('public.products → id, name')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve demo-db', exact: true })).toBeDisabled();
+    await page
+      .getByRole('checkbox', { name: /I consent to sharing the listed data for demo-db/ })
+      .check();
     await page.getByRole('button', { name: 'Approve demo-db', exact: true }).click();
     expect(
       await callBroker(directory, { action: 'request-access', operation: 'demo-db' }),
@@ -247,19 +250,15 @@ test('database policy, approval and editing never reveal the saved URL', async (
     ).toMatchObject({ ok: true, value: { state: 'awaiting-approval' } });
     expect(await page.locator('body').innerText()).not.toContain('synthetic-db-ui-password');
     await page.getByRole('button', { name: '06 Connect an agent' }).click();
-    if (process.platform === 'linux') {
-      isolatedDirectory = await page
-        .getByLabel('Isolated broker directory', { exact: true })
-        .innerText();
-      expect(existsSync(join(isolatedDirectory, 'sandbox.json'))).toBe(true);
-      expect(existsSync(join(isolatedDirectory, 'vault.json'))).toBe(false);
-    }
+    await expect(page.getByLabel('Isolated broker directory', { exact: true })).toHaveCount(0);
+    const connection = await page.evaluate(() => window.agentkey!.connection());
+    expect(connection.ok).toBe(true);
+    if (connection.ok) expect(connection.value).not.toHaveProperty('isolatedDirectory');
     expect(errors).toEqual([]);
   } finally {
     await application.close();
     rmSync(directory, { recursive: true, force: true });
   }
-  if (isolatedDirectory) expect(existsSync(isolatedDirectory)).toBe(false);
 });
 
 test('packaged executable serves both the desktop and its stdio MCP adapter', async () => {
@@ -284,18 +283,11 @@ test('packaged executable serves both the desktop and its stdio MCP adapter', as
     args: ['--data-dir', directory],
     env,
   });
-  const client = new Client({ name: 'packaged-smoke', version: '1.0.0' });
+  let client: Client | undefined;
   try {
     const page = await application.firstWindow();
     await expect(page.getByRole('heading', { name: 'Create your local vault' })).toBeVisible();
-    await client.connect(
-      new StdioClientTransport({
-        command: executable,
-        args: ['--mcp', '--data-dir', directory],
-        env,
-        stderr: 'pipe',
-      }),
-    );
+    client = await connectDesktopMcp(page, directory);
     expect((await client.listTools()).tools).toHaveLength(7);
     const status = await client.callTool({ name: 'agentkey_status', arguments: {} });
     expect(status.isError).toBe(false);
@@ -308,7 +300,7 @@ test('packaged executable serves both the desktop and its stdio MCP adapter', as
     await expect(compact.getByRole('heading', { name: 'Create your local vault' })).toBeVisible();
     await expect(compact.getByRole('button', { name: 'Full window', exact: true })).toBeVisible();
   } finally {
-    await client.close();
+    await client?.close();
     await application.close();
     rmSync(directory, { recursive: true, force: true });
   }

@@ -176,7 +176,7 @@ test('real PostgreSQL boundary and stdio MCP workflow', { timeout: 120_000 }, as
           arguments: { operation: database.name },
         });
         assert.match(JSON.stringify(request), /awaiting-approval/);
-        vault.approve(database.name, 'once');
+        vault.approve(database.name, 'once', undefined, true);
         const result = await client.callTool({
           name: 'agentkey_read_database',
           arguments: { ...query },
@@ -193,7 +193,7 @@ test('real PostgreSQL boundary and stdio MCP workflow', { timeout: 120_000 }, as
           const denied = await callBroker(isolatedDirectory, { action });
           assert.equal(denied.ok, false);
         }
-        vault.approve(database.name, 'until-revoked');
+        vault.approve(database.name, 'until-revoked', undefined, true);
         vault.revoke(database.name);
         assert.equal(
           (await client.callTool({ name: 'agentkey_read_database', arguments: { ...query } }))

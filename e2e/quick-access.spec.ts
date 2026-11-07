@@ -123,6 +123,12 @@ test('compact management shares the vault, preserves drafts and enforces reviewe
     await panel.keyboard.press('Escape');
     await expect(panel.getByRole('listbox')).toHaveCount(0);
     await expect.poll(isVisible).toBe(true);
+    await expect(
+      panel.getByRole('button', { name: 'Approve quick-db', exact: true }),
+    ).toBeDisabled();
+    await panel
+      .getByRole('checkbox', { name: /I consent to sharing the listed data for quick-db/ })
+      .check();
     await panel.getByRole('button', { name: 'Approve quick-db', exact: true }).click();
     expect(
       await callBroker(directory, { action: 'request-access', operation: 'quick-db' }),
@@ -161,7 +167,7 @@ test('compact management shares the vault, preserves drafts and enforces reviewe
     expect(
       await panel.evaluate(async (old) => {
         if (!window.agentkey) throw new Error('Desktop bridge unavailable');
-        return window.agentkey.approve('quick-db', 'day', old);
+        return window.agentkey.approve('quick-db', 'day', old, true);
       }, revision),
     ).toMatchObject({ ok: false, error: expect.stringContaining('settings changed') });
     expect(
