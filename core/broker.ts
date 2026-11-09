@@ -60,8 +60,12 @@ export async function startBroker(
       return;
     }
     clients.add(socket);
+    const controller = new AbortController();
     socket.on('error', () => {});
-    socket.once('close', () => clients.delete(socket));
+    socket.once('close', () => {
+      controller.abort();
+      clients.delete(socket);
+    });
     socket.setTimeout(20_000, () => socket.destroy());
     let pending = Buffer.alloc(0);
     let handled = false;
@@ -71,7 +75,7 @@ export async function startBroker(
         return;
       }
       pending = Buffer.concat([pending, chunk]);
-      if (pending.length > 16384) {
+      if (pending.length > 262144) {
         socket.destroy();
         return;
       }
@@ -96,22 +100,47 @@ export async function startBroker(
           command.action === 'status' ||
           command.action === 'list-databases' ||
           command.action === 'read-database' ||
-          (command.action === 'request-access' &&
+          ((command.action === 'request-access' || command.action === 'wait-for-approval') &&
             vault.snapshot().databases.some((database) => database.name === command.operation));
         if (!allowed) {
           reply({ ok: false, error: 'This connection permits database tools only.' });
           return;
         }
       }
-      void vault
-        .dispatch(input.command)
-        .then(
-          (value) => reply({ ok: true, value }),
-          (error: unknown) => reply({ ok: false, error: publicError(error) }),
-        )
-        .finally(() => {
-          if (input.command.action === 'request-access') notify();
-        });
+      if (input.command.action === 'wait-for-approval')
+        socket.setTimeout(50_000, () => socket.destroy());
+      if (input.command.action === 'run-command')
+        socket.setTimeout(125_000, () => socket.destroy());
+      const approvalKeys = (): Set<string> => {
+        const snapshot = vault.snapshot();
+        return new Set([
+          ...snapshot.pending.map((entry) => `access:${entry.operation}:${entry.requestedAt}`),
+          ...snapshot.proposals.map((entry) => entry.revision),
+          ...snapshot.commands
+            .filter((entry) => entry.state === 'pending')
+            .map((entry) => entry.revision),
+        ]);
+      };
+      const before =
+        input.command.action === 'request-access' ||
+        input.command.action === 'propose-operation' ||
+        input.command.action === 'propose-command'
+          ? approvalKeys()
+          : undefined;
+      void vault.dispatch(input.command, controller.signal).then(
+        (value) => {
+          reply({ ok: true, value });
+          if (before && [...approvalKeys()].some((key) => !before.has(key))) {
+            // Notification delivery must never turn a successful request into an error.
+            try {
+              notify();
+            } catch {
+              /* OS notification support is optional. */
+            }
+          }
+        },
+        (error: unknown) => reply({ ok: false, error: publicError(error) }),
+      );
     });
   });
   await new Promise<void>((resolve, reject) => {

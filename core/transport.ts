@@ -5,6 +5,7 @@ import { isIP } from 'node:net';
 import ipaddr from 'ipaddr.js';
 import type { ItemInput, OperationInput } from '../shared/contracts';
 import { SafeError } from './schema';
+import { validateHttpScope, validateResponseFields } from './http-policy';
 
 export function destination(raw: string): URL {
   let url: URL;
@@ -55,9 +56,11 @@ const forbiddenHeaders = new Set([
 ]);
 export function validateOperation(operation: OperationInput, item: ItemInput): void {
   destination(operation.url);
+  validateResponseFields(operation.responseFields ?? []);
+  validateHttpScope(operation);
   if (operation.method === 'GET' && operation.body)
     throw new SafeError('GET operations cannot have a request body.');
-  if (operation.body) {
+  if (operation.body && operation.bodyFormat !== 'form') {
     try {
       JSON.parse(operation.body);
     } catch {
@@ -111,9 +114,9 @@ export type SendOperation = (
   operation: OperationInput,
   headers: Record<string, string>,
   signal: AbortSignal,
-) => Promise<number>;
+) => Promise<number | { status: number; body: unknown }>;
 
-/** No redirects, proxy environment, cookies, response bodies, or caller-controlled URLs. */
+/** Pinned public HTTPS only; no redirects, proxy environment, cookies or response headers. */
 export const sendOperation: SendOperation = async (operation, headers, parentSignal) => {
   const signal = AbortSignal.any([parentSignal, AbortSignal.timeout(15_000)]);
   const url = destination(operation.url);
@@ -131,7 +134,7 @@ export const sendOperation: SendOperation = async (operation, headers, parentSig
     throw new SafeError('The destination resolved to a private or reserved address.');
   }
   const target = addresses[0]!;
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<number | { status: number; body: unknown }>((resolve, reject) => {
     const req = request(
       {
         protocol: 'https:',
@@ -148,14 +151,75 @@ export const sendOperation: SendOperation = async (operation, headers, parentSig
         headers: {
           ...headers,
           host: url.host,
-          ...(operation.body ? { 'content-type': 'application/json' } : {}),
+          'accept-encoding': 'identity',
+          ...(operation.body
+            ? {
+                'content-type':
+                  operation.bodyFormat === 'form'
+                    ? 'application/x-www-form-urlencoded'
+                    : 'application/json',
+              }
+            : {}),
         },
       },
       (res) => {
         const status = res.statusCode;
-        res.destroy();
-        if (status === undefined) reject(new SafeError('The API did not return a status.'));
-        else resolve(status);
+        if (status === undefined) {
+          res.destroy();
+          reject(new SafeError('The API did not return a status.'));
+          return;
+        }
+        if (!operation.responseFields?.length || status < 200 || status >= 300 || status === 204) {
+          res.destroy();
+          resolve(status);
+          return;
+        }
+        if (
+          !/^application\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(
+            res.headers['content-type'] ?? '',
+          ) ||
+          (res.headers['content-encoding'] && res.headers['content-encoding'] !== 'identity')
+        ) {
+          res.destroy();
+          reject(
+            new SafeError(
+              'Expected an uncompressed JSON response. The API may have processed the request.',
+            ),
+          );
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        let ended = false;
+        res.once('close', () => {
+          for (const chunk of chunks) chunk.fill(0);
+          if (!ended) reject(new SafeError('Response interrupted. Check the API before retrying.'));
+        });
+        res.on('error', () =>
+          reject(new SafeError('Response interrupted. Check the API before retrying.')),
+        );
+        res.on('data', (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > 1_048_576) {
+            chunk.fill(0);
+            res.destroy();
+            reject(new SafeError('API response exceeds 1 MiB. Request fewer records.'));
+          } else chunks.push(chunk);
+        });
+        res.on('end', () => {
+          ended = true;
+          const bytes = Buffer.concat(chunks);
+          try {
+            resolve({ status, body: JSON.parse(bytes.toString('utf8')) as unknown });
+          } catch {
+            reject(
+              new SafeError('The API returned invalid JSON. No response content was returned.'),
+            );
+          } finally {
+            bytes.fill(0);
+            for (const chunk of chunks) chunk.fill(0);
+          }
+        });
       },
     );
     req.on('error', () =>

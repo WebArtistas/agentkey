@@ -134,9 +134,11 @@ for (const packaged of [false, true]) {
       await page.getByRole('button', { name: 'Save SQLite connection', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'selected-copy', exact: true })).toBeVisible();
       await page.getByRole('button', { name: '04 Approvals' }).click();
+      await page.getByRole('button', { name: 'Inactive 2', exact: true }).click();
       const selectedApproval = page.getByRole('button', {
         name: 'Approve selected-copy',
         exact: true,
+        includeHidden: true,
       });
       const selectedConsent = page.getByRole('checkbox', {
         name: /I consent to sharing the listed data for selected-copy/,
@@ -147,16 +149,19 @@ for (const packaged of [false, true]) {
       await expect(selectedApproval).toBeDisabled();
       await demoConsent.check();
       await expect(selectedApproval).toBeDisabled();
+      await page.getByRole('button', { name: /^selected-copy SQLite/ }).click();
       await selectedConsent.check();
+      await page.getByRole('button', { name: /^local-demo SQLite/ }).click();
       await expect(demoConsent).not.toBeChecked();
+      await page.getByRole('button', { name: /^selected-copy SQLite/ }).click();
       await page.getByLabel('New approval duration', { exact: true }).click();
-      await page.getByRole('option', { name: 'hour', exact: true }).click();
-      await expect(page.getByLabel('New approval duration', { exact: true })).toHaveValue('hour');
+      await page.getByRole('option', { name: '1 hour', exact: true }).click();
+      await expect(page.getByLabel('New approval duration', { exact: true })).toHaveValue('1 hour');
       await expect(page.getByRole('listbox')).toHaveCount(0);
       await expect(selectedConsent).not.toBeChecked();
       await expect(selectedApproval).toBeDisabled();
       await page.getByLabel('New approval duration', { exact: true }).click();
-      await page.getByRole('option', { name: 'once', exact: true }).click();
+      await page.getByRole('option', { name: 'One attempt', exact: true }).click();
       await expect(page.getByRole('listbox')).toHaveCount(0);
       await selectedConsent.check();
       await selectedApproval.click();

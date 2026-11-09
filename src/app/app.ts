@@ -1,10 +1,19 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, DestroyRef, inject, linkedSignal, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  linkedSignal,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { disabled, form, FormField, maxLength, required } from '@angular/forms/signals';
 import { TuiButton, TuiCheckbox, TuiInput, TuiRoot } from '@taiga-ui/core';
 import { TuiDataListWrapper, TuiSelect } from '@taiga-ui/kit';
 import type {
   ApprovalDuration,
+  CommandApproval,
   DesktopApi,
   DatabaseInput,
   SQLiteSelection,
@@ -12,6 +21,7 @@ import type {
   ItemInput,
   ItemSummary,
   OperationInput,
+  ProposalApproval,
   Result,
   VaultSnapshot,
 } from '../../shared/contracts';
@@ -20,6 +30,10 @@ import { OperationEditor } from './operation-editor';
 import { PasswordToggle } from './password-toggle';
 import { DatabaseEditor } from './database-editor';
 import { SQLiteEditor } from './sqlite-editor';
+import { HttpReview } from './http-review';
+import { CommandReview } from './command-review';
+import { ApprovalInbox } from './approval-inbox';
+import { APPROVAL_DURATIONS, ApprovalDurationOptions } from './approval-duration';
 
 declare global {
   interface Window {
@@ -44,9 +58,17 @@ type Page = 'vault' | 'operations' | 'databases' | 'access' | 'activity' | 'conn
     PasswordToggle,
     DatabaseEditor,
     SQLiteEditor,
+    HttpReview,
+    CommandReview,
+    ApprovalInbox,
+    ApprovalDurationOptions,
   ],
   templateUrl: './app.html',
-  host: { '(window:focus)': 'focused()', '(window:keydown.escape)': 'dismiss($event)' },
+  host: {
+    '(window:focus)': 'focused()',
+    '(window:keydown.escape)': 'dismiss($event)',
+    '(window:agentkey-approvals)': 'openApprovals()',
+  },
 })
 export class App {
   private readonly api = window.agentkey;
@@ -60,6 +82,7 @@ export class App {
   protected readonly editingItem = signal(false);
   protected readonly initialItem = signal<ItemSummary | null>(null);
   protected readonly editingOperation = signal(false);
+  protected readonly operationDetail = signal<{ revision: string; body: string } | null>(null);
   protected readonly editingDatabase = signal(false);
   protected readonly initialDatabase = signal<DatabaseInput | null>(null);
   protected readonly sqliteSelection = signal<SQLiteSelection | null>(null);
@@ -74,7 +97,10 @@ export class App {
   protected readonly approvalModel = signal<{ duration: ApprovalDuration }>({ duration: 'once' });
   protected readonly approvalForm = form(this.approvalModel);
   private readonly databaseReviews = computed(
-    () => this.snapshot()?.databases.map((database) => database.revision) ?? [],
+    () =>
+      [...(this.snapshot()?.databases ?? []), ...(this.snapshot()?.operations ?? [])].map(
+        (policy) => policy.revision,
+      ),
     { equal: (a, b) => a.length === b.length && a.every((revision, i) => revision === b[i]) },
   );
   protected readonly sharingModel = linkedSignal(() => {
@@ -84,7 +110,13 @@ export class App {
   protected readonly sharingForm = form(this.sharingModel, (path) => {
     disabled(path, () => this.busy());
   });
-  protected readonly durations = ['once', 'hour', 'day', 'until-revoked'];
+  protected readonly durations = APPROVAL_DURATIONS;
+  protected readonly pendingCount = computed(
+    () =>
+      (this.snapshot()?.pending.length ?? 0) +
+      (this.snapshot()?.proposals.length ?? 0) +
+      (this.snapshot()?.commands.filter((request) => request.state === 'pending').length ?? 0),
+  );
   protected readonly pages: { id: Page; label: string; number: string }[] = [
     { id: 'vault', label: 'Vault', number: '01' },
     { id: 'operations', label: 'API operations', number: '02' },
@@ -94,6 +126,7 @@ export class App {
     { id: 'connect', label: 'Connect an agent', number: '06' },
   ];
   private refreshId = 0;
+  private readonly approvalInbox = viewChild(ApprovalInbox);
 
   constructor() {
     if (!this.api) {
@@ -130,6 +163,11 @@ export class App {
     }, 2000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
   }
+  protected openApprovals(): void {
+    this.navigate('access');
+    this.approvalInbox()?.showPending();
+    this.focused();
+  }
   protected focused(): void {
     if (this.api && !this.busy()) void this.refresh();
   }
@@ -150,6 +188,7 @@ export class App {
     this.page.set(page);
     this.editingItem.set(false);
     this.editingOperation.set(false);
+    this.operationDetail.set(null);
     this.editingDatabase.set(false);
     this.sqliteSelection.set(null);
     this.deleting.set('');
@@ -170,6 +209,7 @@ export class App {
     this.authModel.set({ password: '', confirmation: '' });
   }
   protected async lock(): Promise<void> {
+    this.operationDetail.set(null);
     this.clearSharingConsent();
     await this.act(() => this.api!.lock(), 'Vault locked.');
   }
@@ -194,6 +234,45 @@ export class App {
       )
     )
       this.editingOperation.set(false);
+  }
+  protected async approveCommand(input: CommandApproval): Promise<void> {
+    if (await this.act(() => this.api!.approveCommand(input), 'Command approved for one attempt.'))
+      this.approvalInbox()?.focusAfterDecision();
+  }
+  protected async dismissCommand(revision: string): Promise<void> {
+    if (
+      await this.act(
+        () => this.api!.dismissCommand(revision),
+        'Command access ended. Cancellation cannot undo effects.',
+      )
+    )
+      this.approvalInbox()?.focusAfterDecision();
+  }
+  protected async approveProposal(input: ProposalApproval): Promise<void> {
+    if (
+      await this.act(
+        () => this.api!.approveProposal(input),
+        'Request saved and approved. The agent can now run it.',
+      )
+    )
+      this.approvalInbox()?.focusAfterDecision();
+  }
+  protected async dismissProposal(revision: string): Promise<void> {
+    if (
+      await this.act(
+        () => this.api!.dismissProposal(revision),
+        'Request dismissed. No access was granted.',
+      )
+    )
+      this.approvalInbox()?.focusAfterDecision();
+  }
+  protected async reviewOperation(name: string, revision: string): Promise<void> {
+    await this.act(async () => {
+      const result = await this.api!.reviewOperation(name);
+      if (!result.ok) return result;
+      this.operationDetail.set({ revision, body: result.value.body });
+      return { ok: true, value: undefined };
+    }, '');
   }
   protected async prepareSQLite(source: 'demo' | 'file'): Promise<void> {
     this.sqliteSelection.set(null);
@@ -269,16 +348,22 @@ export class App {
   protected async approve(name: string, revision: string): Promise<void> {
     const accepted = this.sharingAccepted(revision);
     this.clearSharingConsent();
-    await this.act(
-      () => this.api!.approve(name, this.approvalModel().duration, revision, accepted),
-      'Approval saved for local clients.',
-    );
+    if (
+      await this.act(
+        () => this.api!.approve(name, this.approvalModel().duration, revision, accepted),
+        'Approval saved for local clients.',
+      )
+    )
+      this.approvalInbox()?.focusAfterDecision();
   }
   protected async revoke(name: string): Promise<void> {
-    await this.act(
-      () => this.api!.revoke(name),
-      'Access revoked. In-flight requests were cancelled where possible.',
-    );
+    if (
+      await this.act(
+        () => this.api!.revoke(name),
+        'Access revoked. In-flight requests were cancelled where possible.',
+      )
+    )
+      this.approvalInbox()?.focusAfterDecision();
   }
   protected grant(name: string) {
     return this.snapshot()?.grants.find((grant) => grant.operation === name);
@@ -289,6 +374,7 @@ export class App {
       const result = await this.api!.snapshot();
       if (id !== this.refreshId) return;
       if (result.ok) {
+        if (!result.value.unlocked) this.operationDetail.set(null);
         this.snapshot.set(result.value);
       } else this.failure.set(result.error);
     } catch {

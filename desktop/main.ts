@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  Notification,
   powerMonitor,
   protocol,
   screen,
@@ -21,6 +22,7 @@ import { durationSchema, nameSchema, parseInput, publicError, SafeError } from '
 import { SQLiteSetup } from '../core/sqlite-setup';
 import { Vault } from '../core/vault';
 import { panelBounds } from './panel';
+import { ApprovalNotifications } from './notifications';
 
 app.setName('AgentKey');
 if (process.argv.includes('--mcp')) {
@@ -52,14 +54,17 @@ let vault: Vault | undefined;
 let sqliteSetup: SQLiteSetup | undefined;
 let broker: Awaited<ReturnType<typeof startBroker>> | undefined;
 let quitting = false;
+let approvalNotifications: ApprovalNotifications | undefined;
 
 function show(): void {
   panel?.hide();
   if (window?.isMinimized()) window.restore();
   window?.show();
   window?.focus();
+  window?.flashFrame(false);
 }
 function lock(): void {
+  approvalNotifications?.clear();
   sqliteSetup?.clear();
   vault?.lock();
   // Both trusted views must discard drafts on lock, sleep and OS screen-lock.
@@ -78,6 +83,7 @@ function secureWindow(view: BrowserWindow): void {
   view.webContents.on('will-navigate', (event) => event.preventDefault());
   view.webContents.on('will-attach-webview', (event) => event.preventDefault());
   view.webContents.on('render-process-gone', () => {
+    approvalNotifications?.clear();
     sqliteSetup?.clear();
     vault?.lock();
     for (const other of [window, panel]) {
@@ -190,7 +196,27 @@ function handle(channel: string, action: (input: unknown) => unknown): void {
     } catch (error) {
       return { ok: false, error: publicError(error) };
     } finally {
-      if (!vault?.storage.unlocked) sqliteSetup?.clear();
+      if (!vault?.storage.unlocked) {
+        sqliteSetup?.clear();
+        approvalNotifications?.clear();
+      } else if (
+        [
+          'vault:approve',
+          'vault:approve-proposal',
+          'vault:dismiss-proposal',
+          'vault:approve-command',
+          'vault:dismiss-command',
+          'vault:revoke',
+        ].includes(channel)
+      ) {
+        const snapshot = vault.snapshot();
+        if (
+          !snapshot.pending.length &&
+          !snapshot.proposals.length &&
+          !snapshot.commands.some((request) => request.state === 'pending')
+        )
+          approvalNotifications?.clear();
+      }
     }
   });
 }
@@ -262,6 +288,11 @@ async function desktop(): Promise<void> {
   handle('vault:save-item', (input) => owner.saveItem(input));
   handle('vault:delete-item', (input) => owner.deleteItem(input));
   handle('vault:save-operation', (input) => owner.saveOperation(input));
+  handle('vault:approve-proposal', (input) => owner.approveProposal(input));
+  handle('vault:dismiss-proposal', (input) => owner.dismissProposal(input));
+  handle('vault:approve-command', (input) => owner.approveCommand(input));
+  handle('vault:dismiss-command', (input) => owner.dismissCommand(input));
+  handle('vault:review-operation', (input) => owner.reviewOperation(input));
   handle('vault:save-database', (input) => owner.saveDatabase(input));
   handle('vault:prepare-sqlite', async (input) => {
     const source = parseInput(z.enum(['demo', 'file']), input);
@@ -359,9 +390,19 @@ async function desktop(): Promise<void> {
   } catch {
     tray = undefined;
   }
-  broker = await startBroker(owner, () => {
-    window?.flashFrame(true);
+  approvalNotifications = new ApprovalNotifications({
+    supported: () => Notification.isSupported(),
+    create: (options) => new Notification({ ...options, icon: icon() }),
+    flash: () => {
+      if (window && !window.isDestroyed()) window.flashFrame(true);
+    },
+    openApprovals: () => {
+      if (quitting || !window || window.isDestroyed()) return;
+      show();
+      window.webContents.send('window:approvals');
+    },
   });
+  broker = await startBroker(owner, () => approvalNotifications?.notify());
   powerMonitor.on('suspend', lock);
   powerMonitor.on('lock-screen', lock);
   app.on('activate', show);
@@ -373,6 +414,7 @@ app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  approvalNotifications?.clear();
   sqliteSetup?.clear();
   vault?.lock();
   void Promise.allSettled([broker?.close()]).finally(() => {

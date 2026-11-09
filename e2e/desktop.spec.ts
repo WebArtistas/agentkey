@@ -127,10 +127,14 @@ test('desktop creates all item types, approves an agent, revokes and locks', asy
       value: { state: 'awaiting-approval', operation: 'test-health' },
     });
     await page.getByRole('button', { name: '04 Approvals' }).click();
-    await expect(page.getByText('Awaiting your decision:')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Needs review 1', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await page.getByLabel('New approval duration', { exact: true }).click();
-    await page.getByRole('option', { name: 'until-revoked', exact: true }).click();
+    await page.getByRole('option', { name: 'Until revoked', exact: true }).click();
     await page.getByRole('button', { name: 'Approve test-health', exact: true }).click();
+    await page.getByRole('button', { name: 'Active access 1', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Revoke access', exact: true })).toBeVisible();
     expect(
       await callBroker(directory, { action: 'request-access', operation: 'test-health' }),
@@ -288,7 +292,11 @@ test('packaged executable serves both the desktop and its stdio MCP adapter', as
     const page = await application.firstWindow();
     await expect(page.getByRole('heading', { name: 'Create your local vault' })).toBeVisible();
     client = await connectDesktopMcp(page, directory);
-    expect((await client.listTools()).tools).toHaveLength(7);
+    const tools = (await client.listTools()).tools;
+    expect(tools).toHaveLength(11);
+    expect(tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(['agentkey_propose_command', 'agentkey_run_command']),
+    );
     const status = await client.callTool({ name: 'agentkey_status', arguments: {} });
     expect(status.isError).toBe(false);
     expect(JSON.stringify(status)).toContain('initialized');

@@ -14,7 +14,7 @@
             @if (snapshot()?.unlocked) {
               <button
                 tuiButton
-                appearance="secondary"
+                appearance="secondary-destructive"
                 size="s"
                 [disabled]="busy()"
                 (click)="lock()"
@@ -51,11 +51,17 @@
             [size]="compact ? 's' : 'm'"
             [appearance]="page() === entry.id ? 'secondary' : 'flat'"
             [attr.aria-current]="page() === entry.id ? 'page' : null"
+            [attr.aria-description]="
+              entry.id === 'access' ? pendingCount() + ' requests need review' : null
+            "
             [disabled]="!snapshot()?.unlocked"
             (click)="navigate(entry.id)"
           >
             <span class="nav-number">{{ entry.number }}</span
             >{{ compact && entry.id === 'connect' ? 'Connect' : entry.label }}
+            @if (entry.id === 'access' && pendingCount()) {
+              <span class="count-badge" aria-hidden="true">{{ pendingCount() }}</span>
+            }
           </button>
         }
       </nav>
@@ -79,7 +85,13 @@
             Quick access
           </button>
           @if (snapshot()?.unlocked) {
-            <button tuiButton appearance="secondary" size="s" [disabled]="busy()" (click)="lock()">
+            <button
+              tuiButton
+              appearance="secondary-destructive"
+              size="s"
+              [disabled]="busy()"
+              (click)="lock()"
+            >
               Lock vault
             </button>
           }
@@ -164,13 +176,8 @@
             <div class="page-heading">
               <div>
                 <p class="eyebrow">01 / VAULT</p>
-                <h1>
-                  @if (compact) {
-                    Vault
-                  } @else {
-                    Names they can use.<br />Values they can’t read.
-                  }
-                </h1>
+                <h1>Vault</h1>
+                <p class="hint">Named credentials. Saved values stay private.</p>
               </div>
               <button tuiButton [disabled]="busy()" (click)="newItem()">Add item</button>
             </div>
@@ -233,13 +240,7 @@
             <div class="page-heading">
               <div>
                 <p class="eyebrow">02 / API OPERATIONS</p>
-                <h1>
-                  @if (compact) {
-                    API operations
-                  } @else {
-                    Define the job.<br />Fix the destination.
-                  }
-                </h1>
+                <h1>API operations</h1>
               </div>
               <button
                 tuiButton
@@ -250,7 +251,9 @@
               </button>
             </div>
             <p class="intro">
-              Saved HTTPS requests. No arbitrary commands, redirects or secret retrieval.
+              Ask your agent to prepare a request using a saved secret, then review it in Approvals.
+              No copying passwords, configuring a proxy or manually assembling headers is required.
+              You can still add an operation yourself.
             </p>
             @if (editingOperation()) {
               <app-operation-editor
@@ -278,7 +281,7 @@
                 </p>
                 <p>
                   Uses <code>{{ operation.item }}</code> · {{ operation.auth }} authentication ·
-                  {{ operation.hasBody ? 'Fixed JSON body' : 'No body' }}
+                  {{ operation.hasBody ? 'Saved request body' : 'No body' }}
                 </p>
                 @for (binding of operation.bindings; track binding.header) {
                   <p class="mono hint">
@@ -305,7 +308,10 @@
             } @empty {
               <div class="empty-state">
                 <h2>No API operations yet.</h2>
-                <p>Add a vault item, then define exactly what an agent may do with it.</p>
+                <p>
+                  Add a vault item, then tell your agent: “Propose an AgentKey HTTPS request using
+                  this item.” Nothing runs until you approve.
+                </p>
               </div>
             }
           }
@@ -313,13 +319,7 @@
             <div class="page-heading">
               <div>
                 <p class="eyebrow">03 / DATABASES</p>
-                <h1>
-                  @if (compact) {
-                    Databases
-                  } @else {
-                    Useful data.<br />Private credentials.
-                  }
-                </h1>
+                <h1>Databases</h1>
               </div>
               <button
                 tuiButton
@@ -433,150 +433,218 @@
             <div class="page-heading">
               <div>
                 <p class="eyebrow">04 / APPROVALS</p>
-                <h1>{{ compact ? 'Approvals' : 'You set the limits.' }}</h1>
+                <h1>Approvals</h1>
+                <p class="hint">Review requests and manage access in one place.</p>
               </div>
             </div>
-            <p class="notice">
-              Approvals apply to <strong>all local clients running as your OS user</strong>, not a
-              verified agent identity. Repeated operations may have repeated side effects. Access
-              works only while AgentKey is running and unlocked.
+            <p class="approval-boundary">
+              Access applies to <strong>all local clients on your OS account</strong>, not a
+              verified agent. AgentKey must be running and unlocked.
             </p>
-            @if (snapshot()!.pending.length) {
-              <div class="feedback">
-                <strong>Awaiting your decision:</strong>
-                @for (request of snapshot()!.pending; track request.operation) {
-                  <code>{{ request.operation }} </code>
-                }
-              </div>
-            }
-            <div class="approval-duration">
-              <tui-textfield [tuiTextfieldCleaner]="false"
-                ><label tuiLabel>New approval duration</label
-                ><input tuiSelect [formField]="approvalForm.duration" /><tui-data-list-wrapper
-                  *tuiDropdown
-                  [items]="durations"
-              /></tui-textfield>
-            </div>
-            <p class="hint">
-              “once” allows one attempt, even if it fails. “until-revoked” stays approved across
-              restarts, but you must unlock the vault again.
-            </p>
-            @for (operation of snapshot()!.operations; track operation.name) {
-              <article class="operation-row">
-                <h2>{{ operation.name }}</h2>
-                <p class="endpoint">
-                  <strong>{{ operation.method }}</strong> {{ operation.url }}
-                </p>
-                <p>
-                  Item: <code>{{ operation.item }}</code> · {{ operation.auth }} ·
-                  {{ operation.hasBody ? 'Fixed JSON body' : 'No body' }}
-                </p>
-                @for (binding of operation.bindings; track binding.header) {
-                  <p class="mono hint">{{ binding.field }} → {{ binding.header }}</p>
-                }
-                @if (grant(operation.name); as active) {
-                  <div class="grant-state">
-                    <span
-                      >Approved ·
-                      {{
-                        active.remainingUses
-                          ? 'One attempt remaining'
-                          : active.expiresAt
-                            ? 'Until ' + (active.expiresAt | date: 'medium')
-                            : 'Until revoked'
-                      }}</span
-                    ><button
-                      tuiButton
-                      appearance="secondary"
-                      size="s"
-                      [disabled]="busy()"
-                      (click)="revoke(operation.name)"
-                    >
-                      Revoke access
-                    </button>
-                  </div>
-                } @else {
-                  <button
-                    tuiButton
-                    size="m"
-                    [disabled]="busy()"
-                    (click)="approve(operation.name, operation.revision)"
-                  >
-                    Approve {{ operation.name }}
-                  </button>
-                }
-              </article>
-            }
-            @for (database of snapshot()!.databases; track database.name; let index = $index) {
-              <article class="operation-row">
-                <h2>{{ database.name }}</h2>
-                <p class="notice">
-                  Read-only {{ database.engine === 'sqlite' ? 'SQLite' : 'PostgreSQL' }}. These
-                  columns may be returned to connected agents, which may send them to any model
-                  provider or other service. AgentKey cannot verify or restrict that destination.
-                  Credentials stay in AgentKey. Revoking access cannot recall data already returned.
-                </p>
-                @for (table of database.tables; track $index) {
-                  <p class="mono">
-                    {{ table.schema }}.{{ table.table }} → {{ table.columns.join(', ') }}
+            <app-approval-inbox #inbox [snapshot]="snapshot()!" [busy]="busy()" [compact]="compact">
+              <div inbox-settings class="inbox-settings">
+                <div class="approval-duration">
+                  <tui-textfield appApprovalDuration [tuiTextfieldCleaner]="false"
+                    ><label tuiLabel>New approval duration</label
+                    ><input tuiSelect [formField]="approvalForm.duration" /><tui-data-list-wrapper
+                      *tuiDropdown
+                      [items]="durations"
+                  /></tui-textfield>
+                </div>
+                <details class="duration-help">
+                  <summary>How durations work</summary>
+                  <p class="hint">
+                    One attempt is consumed even on failure. Timed and until-revoked access permits
+                    repeated actions, which may have repeated side effects. Until revoked survives
+                    restarts, but the vault must be unlocked.
                   </p>
-                }
-                @if (grant(database.name); as active) {
-                  <div class="grant-state">
-                    <span
-                      >Approved ·
-                      {{
-                        active.remainingUses
-                          ? 'One attempt remaining'
-                          : active.expiresAt
-                            ? 'Until ' + (active.expiresAt | date: 'medium')
-                            : 'Until revoked'
-                      }}</span
-                    >
+                  <p class="hint">
+                    New request cards inherit this selection; existing card choices stay unchanged.
+                    Saved API and database approvals use this selector. This preference applies to
+                    this window until restart. Commands always require a fresh one-attempt approval;
+                    this selector does not apply to them.
+                  </p>
+                </details>
+              </div>
+              @for (request of snapshot()!.commands; track request.revision) {
+                <app-command-review
+                  [hidden]="inbox.active()?.key !== 'command:' + request.revision"
+                  [review]="request"
+                  [busy]="busy()"
+                  (approve)="approveCommand($event)"
+                  (dismiss)="dismissCommand($event)"
+                />
+              }
+              @for (proposal of snapshot()!.proposals; track proposal.revision) {
+                <app-http-review
+                  [hidden]="inbox.active()?.key !== 'proposal:' + proposal.revision"
+                  [proposal]="proposal"
+                  [defaultDuration]="approvalModel().duration"
+                  [busy]="busy()"
+                  (approve)="approveProposal($event)"
+                  (dismiss)="dismissProposal($event)"
+                />
+              }
+              @for (operation of snapshot()!.operations; track operation.name; let index = $index) {
+                <article
+                  class="operation-row"
+                  [hidden]="inbox.active()?.key !== 'api:' + operation.name"
+                >
+                  <p class="eyebrow">API permission</p>
+                  <h2>{{ operation.name }}</h2>
+                  <p class="endpoint">
+                    <strong>{{ operation.method }}</strong> {{ operation.url }}
+                  </p>
+                  <p>
+                    Item: <code>{{ operation.item }}</code> · {{ operation.auth }} ·
+                    {{ operation.hasBody ? 'Saved request body' : 'No body' }}
+                  </p>
+                  @for (binding of operation.bindings; track binding.header) {
+                    <p class="mono hint">{{ binding.field }} → {{ binding.header }}</p>
+                  }
+                  <p>Return: {{ operation.responseFields?.join(', ') || 'HTTP status only' }}</p>
+                  @if (operation.scope; as scope) {
+                    <p class="notice">
+                      Reusable permissions: {{ scope.methods.join(', ') }} on
+                      {{ scope.paths.join(', ') }} at the saved origin. Query parameters and bodies
+                      may vary. Secret bindings and response fields stay fixed.
+                    </p>
+                  }
+                  @if (operation.hasBody) {
                     <button
                       tuiButton
-                      appearance="secondary"
+                      appearance="flat"
                       size="s"
                       [disabled]="busy()"
-                      (click)="revoke(database.name)"
+                      (click)="reviewOperation(operation.name, operation.revision)"
                     >
-                      Revoke access
+                      Show request body
                     </button>
-                  </div>
-                } @else {
-                  <label class="sharing-consent">
-                    <input
-                      tuiCheckbox
-                      type="checkbox"
-                      [formField]="sharingForm.reviews[index].accepted"
-                      (change)="acceptDataSharing(database.revision, $event)"
-                    />
-                    I consent to sharing the listed data for {{ database.name }} with connected
-                    agents and their providers for the selected approval duration.
-                  </label>
-                  <button
-                    tuiButton
-                    size="m"
-                    [disabled]="busy() || !sharingAccepted(database.revision)"
-                    (click)="approve(database.name, database.revision)"
-                  >
-                    Approve {{ database.name }}
-                  </button>
-                }
-              </article>
-            }
-            @if (!snapshot()!.operations.length && !snapshot()!.databases.length) {
-              <div class="empty-state">
-                <h2>Nothing to approve yet.</h2>
-                <p>Define an API operation or database connection first.</p>
-              </div>
-            }
+                    @if (operationDetail()?.revision === operation.revision) {
+                      <pre>{{ operationDetail()?.body }}</pre>
+                    }
+                  }
+                  @if (grant(operation.name); as active) {
+                    <div class="grant-state">
+                      <span
+                        >Approved ·
+                        {{
+                          active.remainingUses
+                            ? 'One attempt remaining'
+                            : active.expiresAt
+                              ? 'Until ' + (active.expiresAt | date: 'medium')
+                              : 'Until revoked'
+                        }}</span
+                      ><button
+                        tuiButton
+                        appearance="secondary-destructive"
+                        size="s"
+                        [disabled]="busy()"
+                        (click)="revoke(operation.name)"
+                      >
+                        Revoke access
+                      </button>
+                    </div>
+                  } @else {
+                    @if (operation.responseFields?.length) {
+                      <label class="sharing-consent">
+                        <input
+                          tuiCheckbox
+                          type="checkbox"
+                          [formField]="
+                            sharingForm.reviews[snapshot()!.databases.length + index].accepted
+                          "
+                          (change)="acceptDataSharing(operation.revision, $event)"
+                        />
+                        I trust this API and consent to sharing the selected fields with agents and
+                        their providers for the selected duration. Redaction is best-effort, not a
+                        guarantee against encoded secrets.
+                      </label>
+                    }
+                    <button
+                      tuiButton
+                      size="m"
+                      [disabled]="
+                        busy() ||
+                        (!!operation.responseFields?.length && !sharingAccepted(operation.revision))
+                      "
+                      (click)="approve(operation.name, operation.revision)"
+                    >
+                      Approve {{ operation.name }}
+                    </button>
+                  }
+                </article>
+              }
+              @for (database of snapshot()!.databases; track database.name; let index = $index) {
+                <article
+                  class="operation-row"
+                  [hidden]="inbox.active()?.key !== 'database:' + database.name"
+                >
+                  <p class="eyebrow">Database permission</p>
+                  <h2>{{ database.name }}</h2>
+                  <p class="notice">
+                    Read-only {{ database.engine === 'sqlite' ? 'SQLite' : 'PostgreSQL' }}. These
+                    columns may be returned to connected agents, which may send them to any model
+                    provider or other service. AgentKey cannot verify or restrict that destination.
+                    Credentials stay in AgentKey. Revoking access cannot recall data already
+                    returned.
+                  </p>
+                  @for (table of database.tables; track $index) {
+                    <p class="mono">
+                      {{ table.schema }}.{{ table.table }} → {{ table.columns.join(', ') }}
+                    </p>
+                  }
+                  @if (grant(database.name); as active) {
+                    <div class="grant-state">
+                      <span
+                        >Approved ·
+                        {{
+                          active.remainingUses
+                            ? 'One attempt remaining'
+                            : active.expiresAt
+                              ? 'Until ' + (active.expiresAt | date: 'medium')
+                              : 'Until revoked'
+                        }}</span
+                      >
+                      <button
+                        tuiButton
+                        appearance="secondary-destructive"
+                        size="s"
+                        [disabled]="busy()"
+                        (click)="revoke(database.name)"
+                      >
+                        Revoke access
+                      </button>
+                    </div>
+                  } @else {
+                    <label class="sharing-consent">
+                      <input
+                        tuiCheckbox
+                        type="checkbox"
+                        [formField]="sharingForm.reviews[index].accepted"
+                        (change)="acceptDataSharing(database.revision, $event)"
+                      />
+                      I consent to sharing the listed data for {{ database.name }} with connected
+                      agents and their providers for the selected approval duration.
+                    </label>
+                    <button
+                      tuiButton
+                      size="m"
+                      [disabled]="busy() || !sharingAccepted(database.revision)"
+                      (click)="approve(database.name, database.revision)"
+                    >
+                      Approve {{ database.name }}
+                    </button>
+                  }
+                </article>
+              }
+            </app-approval-inbox>
           }
           @case ('activity') {
             <div class="page-heading">
               <div>
                 <p class="eyebrow">05 / ACTIVITY</p>
-                <h1>{{ compact ? 'Recent activity' : 'A record. Not a leak.' }}</h1>
+                <h1>Activity</h1>
               </div>
             </div>
             <p class="intro">
@@ -600,13 +668,7 @@
             <div class="page-heading">
               <div>
                 <p class="eyebrow">06 / CONNECT</p>
-                <h1>
-                  @if (compact) {
-                    Connect an agent
-                  } @else {
-                    One protocol.<br />Your choice of agent.
-                  }
-                </h1>
+                <h1>Connect an agent</h1>
               </div>
             </div>
             <h2>Standard MCP — trusted local clients</h2>

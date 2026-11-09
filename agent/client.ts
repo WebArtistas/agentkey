@@ -17,7 +17,9 @@ const responseSchema = z.discriminatedUnion('ok', [
 export async function callBroker(
   directory: string,
   command: AgentCommand,
+  signal?: AbortSignal,
 ): Promise<Result<unknown>> {
+  if (signal?.aborted) throw new SafeError('AgentKey request cancelled.');
   let descriptor: z.infer<typeof descriptorSchema>;
   try {
     const path = join(directory, 'agent-connection.json');
@@ -51,13 +53,22 @@ export async function callBroker(
         finished = true;
         reject(
           new SafeError(
-            'AgentKey connection ended. If a request was running, check the API before retrying.',
+            'AgentKey connection ended. If a request was running, check the target before retrying; effects may already have occurred.',
           ),
         );
       }
+      signal?.removeEventListener('abort', fail);
       socket.destroy();
     };
-    socket.setTimeout(22_000, fail);
+    signal?.addEventListener('abort', fail, { once: true });
+    socket.setTimeout(
+      command.action === 'run-command'
+        ? 127_000
+        : command.action === 'wait-for-approval'
+          ? 52_000
+          : 22_000,
+      fail,
+    );
     socket.once('error', fail);
     socket.once('end', () => {
       if (!finished) fail();
@@ -78,6 +89,7 @@ export async function callBroker(
           JSON.parse(pending.subarray(0, newline).toString('utf8')),
         );
         finished = true;
+        signal?.removeEventListener('abort', fail);
         resolve(result);
         socket.destroy();
       } catch {

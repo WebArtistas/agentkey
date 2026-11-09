@@ -265,7 +265,11 @@ test('real local broker and stdio MCP round trip never return a canary secret', 
       }),
     );
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 7);
+    assert.equal(tools.length, 11);
+    assert.ok(tools.some((tool) => tool.name === 'agentkey_propose_command'));
+    assert.ok(tools.some((tool) => tool.name === 'agentkey_run_command'));
+    assert.ok(tools.some((tool) => tool.name === 'agentkey_wait_for_approval'));
+    assert.ok(tools.some((tool) => tool.name === 'agentkey_propose_operation'));
     assert.ok(!tools.some((tool) => /get_secret|approve|unlock/.test(tool.name)));
     for (const name of ['agentkey_status', 'agentkey_list_items', 'agentkey_list_operations']) {
       const result = await client.callTool({ name, arguments: {} });

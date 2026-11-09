@@ -54,6 +54,7 @@ test('transport pins validated DNS with original TLS identity and discards redir
       assert.deepEqual(options.headers, {
         authorization: 'Bearer synthetic',
         host: 'api.example.com',
+        'accept-encoding': 'identity',
       });
       const request = new EventEmitter();
       Object.assign(request, {

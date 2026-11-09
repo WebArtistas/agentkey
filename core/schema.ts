@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { databaseReadSchema, databaseSchema } from './database-schema';
+import { commandProposalSchema, commandRunSchema } from './command-schema';
 
 export const nameSchema = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/);
 const fieldSchema = z.strictObject({ name: nameSchema, value: z.string().min(1).max(8192) });
@@ -23,11 +24,22 @@ export const itemSchema = z
       ctx.addIssue({ code: 'custom', message: 'Logins require username and password' });
     }
   });
+export const httpMethodSchema = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+export const httpScopeSchema = z.strictObject({
+  paths: z.array(z.string().min(1).max(512)).min(1).max(16),
+  methods: z.array(httpMethodSchema).min(1).max(5),
+});
+export const httpRequestSchema = z.strictObject({
+  url: z.string().min(1).max(2048),
+  method: httpMethodSchema,
+  body: z.string().max(32768),
+});
+export const responseFieldsSchema = z.array(z.string().min(1).max(256)).max(16);
 export const operationSchema = z.strictObject({
   name: nameSchema,
   item: nameSchema,
   url: z.string().min(1).max(2048),
-  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  method: httpMethodSchema,
   auth: z.enum(['headers', 'basic']),
   bindings: z
     .array(
@@ -42,8 +54,19 @@ export const operationSchema = z.strictObject({
     )
     .max(16),
   body: z.string().max(32768),
+  bodyFormat: z.enum(['json', 'form']).optional(),
+  responseFields: responseFieldsSchema.optional(),
+  scope: httpScopeSchema.optional(),
 });
+// Agents can propose exact requests, never grant themselves reusable permissions.
+export const proposalSchema = operationSchema.omit({ scope: true });
 export const durationSchema = z.enum(['once', 'hour', 'day', 'until-revoked']);
+export const proposalApprovalSchema = z.strictObject({
+  revision: z.uuid(),
+  duration: durationSchema,
+  dataSharingAccepted: z.boolean(),
+  scope: httpScopeSchema.optional(),
+});
 export const grantSchema = z.strictObject({
   operation: nameSchema,
   expiresAt: z.number().int().positive().nullable(),
@@ -91,12 +114,24 @@ export const dataSchema = z
     );
   });
 export type VaultData = z.infer<typeof dataSchema>;
+export const waitOptionsSchema = z.strictObject({
+  operation: nameSchema,
+  timeoutMs: z.number().int().min(1).max(45000).default(45000),
+});
 export const agentCommandSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('status') }),
   z.strictObject({ action: z.literal('list-items') }),
   z.strictObject({ action: z.literal('list-operations') }),
   z.strictObject({ action: z.literal('request-access'), operation: nameSchema }),
-  z.strictObject({ action: z.literal('run'), operation: nameSchema }),
+  z.strictObject({ action: z.literal('wait-for-approval'), ...waitOptionsSchema.shape }),
+  z.strictObject({ action: z.literal('propose-operation'), operation: proposalSchema }),
+  z.strictObject({
+    action: z.literal('run'),
+    operation: nameSchema,
+    request: httpRequestSchema.optional(),
+  }),
+  z.strictObject({ action: z.literal('propose-command'), command: commandProposalSchema }),
+  z.strictObject({ action: z.literal('run-command'), ...commandRunSchema.shape }),
   z.strictObject({ action: z.literal('list-databases') }),
   z.strictObject({ action: z.literal('read-database'), query: databaseReadSchema }),
 ]);

@@ -118,7 +118,10 @@ test('compact management shares the vault, preserves drafts and enforces reviewe
     await expect(panel.getByRole('heading', { name: 'quick-db', exact: true })).toBeVisible();
     await callBroker(directory, { action: 'request-access', operation: 'quick-db' });
     await panel.getByRole('button', { name: 'Approvals', exact: true }).click();
-    await expect(panel.getByText('Awaiting your decision:')).toBeVisible();
+    await expect(
+      panel.getByRole('button', { name: 'Needs review 1', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await panel.getByText('Search, filters & duration', { exact: true }).click();
     await panel.getByLabel('New approval duration', { exact: true }).click();
     await panel.keyboard.press('Escape');
     await expect(panel.getByRole('listbox')).toHaveCount(0);
@@ -133,6 +136,7 @@ test('compact management shares the vault, preserves drafts and enforces reviewe
     expect(
       await callBroker(directory, { action: 'request-access', operation: 'quick-db' }),
     ).toMatchObject({ ok: true, value: { state: 'approved' } });
+    await panel.getByRole('button', { name: 'Active access 1', exact: true }).click();
     await panel.getByRole('button', { name: 'Revoke access', exact: true }).click();
     await panel.locator('main').evaluate((main) => main.scrollTo(0, 0));
     await panel.screenshot({ path: 'test-results/quick-access.png', animations: 'disabled' });

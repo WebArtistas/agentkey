@@ -95,14 +95,26 @@ import type { ItemSummary, OperationInput } from '../../shared/contracts';
       }
       @if (draft().method !== 'GET') {
         <tui-textfield [tuiTextfieldCleaner]="false"
-          ><label tuiLabel>Fixed JSON body (optional)</label
+          ><label tuiLabel>Fixed request body (optional)</label
           ><textarea tuiTextarea [formField]="fields.body" spellcheck="false"></textarea>
         </tui-textfield>
       }
+      <tui-textfield [tuiTextfieldCleaner]="false">
+        <label tuiLabel>Body format</label><input tuiSelect [formField]="optionsForm.bodyFormat" />
+        <tui-data-list-wrapper *tuiDropdown [items]="bodyFormats" />
+      </tui-textfield>
+      <tui-textfield [tuiTextfieldCleaner]="false">
+        <label tuiLabel>Returned JSON fields (optional)</label>
+        <input tuiInput [formField]="optionsForm.responseFields" placeholder="id, data[].name" />
+      </tui-textfield>
+      <p class="hint">
+        Comma-separated scalar fields, not entire objects. Leave empty for status only. Data sharing
+        requires consent at approval.
+      </p>
       <p class="notice">
         Only public HTTPS destinations on port 443. No redirects. Put secrets in the vault, not the
-        URL, prefix or JSON body. Results contain HTTP status only. Reusing a name replaces the
-        operation and revokes its approval.
+        URL, prefix or request body. Only selected JSON fields may be returned. Reusing a name
+        replaces the operation and revokes its approval.
       </p>
       <button tuiButton type="submit" [disabled]="busy()">
         {{ busy() ? 'Saving…' : 'Save operation' }}
@@ -117,6 +129,14 @@ export class OperationEditor {
   readonly cancel = output<void>();
   protected readonly methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
   protected readonly authTypes = ['headers', 'basic'];
+  protected readonly bodyFormats = ['json', 'form'];
+  protected readonly options = signal<{ bodyFormat: 'json' | 'form'; responseFields: string }>({
+    bodyFormat: 'json',
+    responseFields: '',
+  });
+  protected readonly optionsForm = form(this.options, (path) =>
+    maxLength(path.responseFields, 4096),
+  );
   protected readonly draft = signal<OperationInput>({
     name: '',
     item: '',
@@ -158,6 +178,11 @@ export class OperationEditor {
     const operation = this.draft();
     this.save.emit({
       ...operation,
+      bodyFormat: this.options().bodyFormat,
+      responseFields: this.options()
+        .responseFields.split(',')
+        .map((field) => field.trim())
+        .filter(Boolean),
       bindings: operation.auth === 'basic' ? [] : operation.bindings,
       body: operation.method === 'GET' ? '' : operation.body,
     });
