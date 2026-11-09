@@ -25,6 +25,7 @@
     "build": "pnpm build:core && pnpm build:ui",
     "start": "pnpm build && pnpm desktop",
     "desktop": "node scripts/desktop.cjs",
+    "install:launcher": "node scripts/install-linux-launcher.cjs",
     "agent": "node dist/agent/cli.js",
     "test": "pnpm build:core && node --test dist/tests/*.test.js",
     "test:e2e": "playwright test",
@@ -96,6 +97,7 @@
     ],
     "asar": true,
     "linux": {
+      "icon": "public/agentkey.png",
       "target": [
         "AppImage"
       ],

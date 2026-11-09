@@ -42,6 +42,28 @@ Electron may download its runtime on first launch. Do not run the app as root or
 
 The source app needs no dev server. It serves only bundled files through a restricted `agentkey://app` protocol. The regular browser has no vault bridge.
 
+### Linux application launcher
+
+To add AgentKey to your applications menu from this checkout:
+
+```sh
+pnpm package:dir
+pnpm install:launcher
+```
+
+Search for **AgentKey** in the applications menu and click its key icon. You can
+pin it to your dock. The launcher opens the packaged app without a terminal and
+brings its existing window forward if it is already running. Unlock the vault
+normally; launching never unlocks it automatically.
+
+This installs only a user-local `agentkey.desktop` under
+`${XDG_DATA_HOME:-~/.local/share}/applications`; it does not enable autostart or
+change agent configuration. It points to this checkout's `release/linux-unpacked`
+app and `public/agentkey.png`, so keep the checkout in place. Rebuild with
+`pnpm package:dir` after updates, then quit from the tray and reopen. The installer
+refuses to overwrite an existing launcher; remove that specific desktop file
+before reinstalling after moving the checkout, or to uninstall the menu entry.
+
 ## First use
 
 1. Create a vault with a master passphrase of at least 14 characters. There is no recovery service.
