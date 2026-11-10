@@ -34,3 +34,11 @@ jobs:
       - name: Electron smoke on Windows and macOS
         if: runner.os != 'Linux'
         run: pnpm test:e2e
+      - name: Save failed Electron test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: electron-failures-${{ matrix.os }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

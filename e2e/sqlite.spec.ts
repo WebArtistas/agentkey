@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { callMcp, connectDesktopMcp } from './mcp';
+import { showFullWindow } from './window-switch';
 
 for (const packaged of [false, true]) {
   test(`SQLite guided demo and selected file (${packaged ? 'packaged' : 'source'})`, async () => {
@@ -71,7 +72,7 @@ for (const packaged of [false, true]) {
       const panel = await opening;
       await panel.waitForURL('**?view=compact');
       await panel.getByRole('button', { name: 'Activity', exact: true }).click();
-      await panel.getByRole('button', { name: 'Full window', exact: true }).click();
+      await showFullWindow(app, panel, page);
       await expect(page.getByRole('heading', { name: 'Choose SQLite access' })).toBeVisible();
       await page.getByRole('button', { name: 'Save SQLite connection', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'local-demo', exact: true })).toBeVisible();

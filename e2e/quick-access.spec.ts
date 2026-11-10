@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { callBroker } from '../agent/client';
 import type { DesktopApi } from '../shared/contracts';
+import { showFullWindow } from './window-switch';
 
 declare global {
   interface Window {
@@ -159,7 +160,7 @@ test('compact management shares the vault, preserves drafts and enforces reviewe
     await expect(panel.getByText('revoked', { exact: true })).toBeVisible();
     await panel.getByRole('button', { name: 'Connect', exact: true }).click();
     await expect(panel.locator('pre').filter({ hasText: 'mcpServers' })).toBeVisible();
-    await panel.getByRole('button', { name: 'Full window', exact: true }).click();
+    await showFullWindow(application, panel, full);
     await expect.poll(isVisible).toBe(false);
     await full.getByRole('button', { name: '03 Databases' }).click();
     await full.getByRole('button', { name: 'Edit policy', exact: true }).click();
