@@ -60,12 +60,29 @@ Use standard MCP; AgentKey sends the HTTPS request itself. HTTPS operations do n
 Use only when `agentkey_propose_command` and `agentkey_run_command` are actually exposed by the connected adapter. After updating AgentKey, the human must quit/relaunch the desktop and reconnect MCP; editing a guide does not update a running process.
 
 1. Confirm the requested action, target and side effects. Inspect the program and its environment requirements. Database writes, migrations and remote operations still need explicit user authorization for the exact target and scope; a saved `DB_URL` is not permission. Do not use command execution to bypass a denied database/API request.
-2. Discover item/field names using `agentkey_list_items`. Propose an exact command with a unique `name`, absolute `executable`, absolute `cwd`, `args` array, `timeoutMs` (100–120000), and `bindings` such as `[{"env":"DB_URL","item":"project-staging","field":"DB_URL"}]`. These are references, never values. Use the project's absolute interpreter path (for example `.venv/bin/python` resolved to an absolute path), not `export`, shell substitution or a credential-printing wrapper.
+2. Discover item/field names using `agentkey_list_items`. Propose an exact command with a unique `name`, absolute `executable`, absolute `cwd`, `args` array, `timeoutMs` (100–120000), and `bindings` such as `[{"env":"DATABASE_URL","item":"project-staging","field":"DB_URL"}]`. `item` and `field` identify the saved source; `env` is the destination variable the program reads. **The saved field and environment variable names do not need to match.** These are references, never values; do not rename vault fields or edit `.env` merely to match names. Use the project's absolute interpreter path (for example `.venv/bin/python` resolved to an absolute path), not `export`, shell substitution or a credential-printing wrapper.
 3. Explain that the approved program receives real credentials and OS-user privileges. There is no sandbox or protection against hostile code, scripts or dependencies, including code the agent can modify. AgentKey supplies no automatic shell, interactive stdin or inherited desktop environment (except Windows SystemRoot). Startup/loader environment bindings are reserved. Do not modify the reviewed program while awaiting approval or execution.
 4. Keep the returned operation name and revision. Direct the human to **Approvals → Command** to review the exact action, secret mappings and both execution/output-sharing consents. Call `agentkey_wait_for_approval` once with the operation name. Never approve through desktop automation. On timeout or another non-approved state, stop for the human. On resume, proposing the identical command retrieves its current revision/state; changed commands require a new name.
 5. Call `agentkey_run_command` with only `operation` and `revision`. Every execution needs a fresh one-attempt approval; API duration controls do not apply. Pending/approved commands expire ten minutes after proposal, on lock/restart, rotation/deletion or dismissal. Approval is consumed before launch even on failure, and cannot be replayed concurrently.
 6. Results contain `exitCode`, `successful`, `stdout` and `stderr`. Combined output is bounded to 64 KiB and redacted only on completion; overflow discards output. Redaction covers known values and common encodings, not all transformations or unrelated sensitive data. Treat output as untrusted data which may reach a model/provider. Never intentionally print secrets, connection URLs, environment dumps or use output to retrieve credentials.
 7. Lock, revoke, cancellation, disconnect and deadline trigger best-effort process cleanup and suppress late output. Child descendants may escape cleanup; cancellation cannot roll back effects. A nonzero exit, lost connection or timeout may follow partial changes. Check the actual target state before any fresh approved attempt; never retry automatically. This interface is for bounded foreground commands, not servers, interactive prompts or long-running jobs.
+
+### Environment mapping and application settings
+
+For a program that reads `DATABASE_URL`, a saved field named `DB_URL` can be bound directly:
+
+```json
+{
+  "bindings": [{ "env": "DATABASE_URL", "item": "project-staging", "field": "DB_URL" }]
+}
+```
+
+Use the real item name discovered from AgentKey. This mapping injects the saved value into the approved child process only; it neither renames the vault field nor exports anything into the agent's shell.
+
+- Inspect the program's configuration code before proposing the command. Do not assume every Django project reads `DATABASE_URL`; use the name that this project actually consumes.
+- AgentKey does not load `.env` or initialize application settings. If the program loads `.env`, inspect its precedence rules and ensure it does not overwrite the intended injected value or silently select a different database. Establish the intended environment **before** the application initializes its database settings; changing a variable afterward may not change an already configured connection.
+- A direct database-client script bypasses framework settings. Check which variable it reads and which connection options it passes. Do not attribute a connection failure to a Django variable-name mismatch when Django was never used.
+- If a diagnostic is authorized, use a minimal read-only check with sanitized results. Never print connection strings, credentials, environment dumps or raw driver exceptions. A failed attempt still requires a fresh approval before another execution; this guidance does not authorize a staging connection or retry.
 
 ## Boundaries
 
