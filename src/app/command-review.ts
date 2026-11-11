@@ -15,35 +15,11 @@ import type { CommandApproval, CommandRequest } from '../../shared/contracts';
         modify files, contact services and change databases. This is not a sandbox. Trust the
         executable, scripts and dependencies—not just the command name.
       </p>
-      <p><strong>Executable</strong></p>
-      <pre>{{ review().command.executable }}</pre>
-      <p><strong>Working directory</strong></p>
-      <pre>{{ review().command.cwd }}</pre>
-      <p><strong>Exact arguments (JSON array)</strong></p>
-      <pre>{{ argumentsText() }}</pre>
-      <p><strong>Child-process secret bindings</strong></p>
-      @for (binding of review().command.bindings; track binding.env) {
-        <p class="mono">{{ binding.env }} ← [{{ binding.item }}.{{ binding.field }}]</p>
-      }
-      <p>
-        No automatic shell or interactive input. The desktop environment is not inherited (except
-        Windows SystemRoot). Credentials are not exported into the agent's shell.
-      </p>
-      <p>
-        Timeout: {{ review().command.timeoutMs / 1000 }} seconds. Return: exit status and up to 64
-        KiB combined stdout/stderr. Secret redaction is best-effort; transformed secrets and other
-        sensitive data may reach the agent/provider.
-      </p>
-      <p>
-        One attempt only, even on failure. This request expires ten minutes after submission or on
-        lock. Approval does not launch it. Code changes are not tracked; do not change the program
-        between review and execution.
-      </p>
       @if (review().state === 'pending') {
         <form class="editor" (submit)="$event.preventDefault(); submit()">
           <label class="sharing-consent"
             ><input tuiCheckbox type="checkbox" [formField]="fields.execution" />I trust this
-            program and approve the exact action and secret bindings above.</label
+            program and approve the exact action and secret bindings shown in this request.</label
           >
           <label class="sharing-consent"
             ><input tuiCheckbox type="checkbox" [formField]="fields.sharing" />I accept best-effort
@@ -86,6 +62,30 @@ import type { CommandApproval, CommandRequest } from '../../shared/contracts';
           {{ review().state === 'running' ? 'Cancel command' : 'Revoke command' }}
         </button>
       }
+      <p><strong>Executable</strong></p>
+      <pre>{{ review().command.executable }}</pre>
+      <p><strong>Working directory</strong></p>
+      <pre>{{ review().command.cwd }}</pre>
+      <p><strong>Exact arguments (JSON array)</strong></p>
+      <pre>{{ argumentsText() }}</pre>
+      <p><strong>Child-process secret bindings</strong></p>
+      @for (binding of review().command.bindings; track binding.env) {
+        <p class="mono">{{ binding.env }} ← [{{ binding.item }}.{{ binding.field }}]</p>
+      }
+      <p>
+        No automatic shell or interactive input. The desktop environment is not inherited (except
+        Windows SystemRoot). Credentials are not exported into the agent's shell.
+      </p>
+      <p>
+        Timeout: {{ review().command.timeoutMs / 1000 }} seconds. Return: exit status and up to 64
+        KiB combined stdout/stderr. Secret redaction is best-effort; transformed secrets and other
+        sensitive data may reach the agent/provider.
+      </p>
+      <p>
+        One attempt only, even on failure. This request expires ten minutes after submission or on
+        lock. Approval does not launch it. Code changes are not tracked; do not change the program
+        between review and execution.
+      </p>
     </article>
   `,
 })

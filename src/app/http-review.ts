@@ -40,26 +40,6 @@ import type {
         <strong>Return to the agent:</strong>
         {{ review().operation.responseFields?.join(', ') || 'HTTP status only' }}
       </p>
-      <details>
-        <summary>Exact request and secret mapping</summary>
-        <p>
-          Authentication:
-          {{
-            review().operation.auth === 'basic'
-              ? 'HTTP Basic (saved username and password)'
-              : 'Secret headers'
-          }}
-        </p>
-        @for (binding of review().operation.bindings; track binding.header) {
-          <p class="mono">
-            {{ binding.header }} ← {{ binding.prefix }}[{{ review().operation.item }}.{{
-              binding.field
-            }}]
-          </p>
-        }
-        <p>Body format: {{ review().operation.bodyFormat || 'json' }}</p>
-        <pre>{{ review().operation.body || '(no request body)' }}</pre>
-      </details>
       <form (submit)="$event.preventDefault(); submit()" class="editor">
         <tui-textfield appApprovalDuration [tuiTextfieldCleaner]="false">
           <label tuiLabel>Allow this request</label>
@@ -70,6 +50,30 @@ import type {
           Once means one attempt, even on failure. Approval does not send the request; the agent
           runs it afterward.
         </p>
+        <label class="sharing-consent">
+          <input tuiCheckbox type="checkbox" [formField]="consentForm.accepted" />
+          I trust this destination and approve the displayed action{{
+            draft().reusable ? ' and reusable permissions' : ''
+          }}.
+          @if (review().operation.responseFields?.length) {
+            I consent to sharing the selected data with agents and their providers. Secret redaction
+            is best-effort; an API can return encoded secrets or sensitive data.
+          }
+        </label>
+        <div class="field-row review-actions">
+          <button tuiButton type="submit" [disabled]="busy() || !consent().accepted">
+            Approve request
+          </button>
+          <button
+            tuiButton
+            type="button"
+            appearance="secondary"
+            [disabled]="busy()"
+            (click)="dismiss.emit(review().revision)"
+          >
+            Dismiss request
+          </button>
+        </div>
         <details>
           <summary>Advanced: reusable API permissions</summary>
           <label class="sharing-consent">
@@ -101,31 +105,27 @@ import type {
             </fieldset>
           }
         </details>
-        <label class="sharing-consent">
-          <input tuiCheckbox type="checkbox" [formField]="consentForm.accepted" />
-          I trust this destination and approve the displayed action{{
-            draft().reusable ? ' and reusable permissions' : ''
-          }}.
-          @if (review().operation.responseFields?.length) {
-            I consent to sharing the selected data with agents and their providers. Secret redaction
-            is best-effort; an API can return encoded secrets or sensitive data.
-          }
-        </label>
-        <div class="field-row review-actions">
-          <button tuiButton type="submit" [disabled]="busy() || !consent().accepted">
-            Approve request
-          </button>
-          <button
-            tuiButton
-            type="button"
-            appearance="secondary"
-            [disabled]="busy()"
-            (click)="dismiss.emit(review().revision)"
-          >
-            Dismiss request
-          </button>
-        </div>
       </form>
+      <details>
+        <summary>Exact request and secret mapping</summary>
+        <p>
+          Authentication:
+          {{
+            review().operation.auth === 'basic'
+              ? 'HTTP Basic (saved username and password)'
+              : 'Secret headers'
+          }}
+        </p>
+        @for (binding of review().operation.bindings; track binding.header) {
+          <p class="mono">
+            {{ binding.header }} ← {{ binding.prefix }}[{{ review().operation.item }}.{{
+              binding.field
+            }}]
+          </p>
+        }
+        <p>Body format: {{ review().operation.bodyFormat || 'json' }}</p>
+        <pre>{{ review().operation.body || '(no request body)' }}</pre>
+      </details>
     </article>
   `,
 })
