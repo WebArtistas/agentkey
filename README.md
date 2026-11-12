@@ -182,7 +182,7 @@ Tools:
 - `agentkey_list_operations`: saved operation metadata and any reusable rules, without secret values or body contents.
 - `agentkey_propose_operation`: queue an exact request with saved secret references for human review; never sends or grants it.
 - `agentkey_request_access`: queue a human approval request or report an existing grant.
-- `agentkey_wait_for_approval`: hold one tool call for up to 45 seconds, then return the human decision or timeout. Does not grant, consume or run anything. Continue only on `approved`; otherwise stop for the human, without looping. Execution always rechecks access.
+- `agentkey_wait_for_approval`: hold one tool call for up to 45 seconds, then return the human decision or timeout. Does not grant, consume or run anything. Continue only on `approved`. A `timeout` means the request is still pending; an agent may wait again, up to 13 calls (about ten minutes) per request. On any other state it stops for the human. Execution always rechecks access.
 - `agentkey_run_operation`: run an approved operation and return HTTP status plus selected JSON fields. An optional structured `request` (`url`, `method`, `body`) is accepted only under Advanced reusable permissions.
 - `agentkey_propose_command`: submit an exact local executable/cwd/arguments and saved-field environment bindings for one-attempt desktop approval. Returns its revision; never launches the command.
 - `agentkey_run_command`: consume that exact approval and launch the trusted program. No overrides; returns bounded, best-effort-redacted stdout/stderr and exit status.
