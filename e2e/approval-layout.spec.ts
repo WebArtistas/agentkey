@@ -123,15 +123,30 @@ test('approval controls precede long details in wide, narrow and compact views',
         const approve = review.getByRole('button', { name: entry.button, exact: true });
         await expect(approve).toBeDisabled();
         const detail = review.getByText(entry.detail, { exact: entry.name !== 'saved-database' });
-        const actionBounds = await approve.boundingBox();
-        const detailBounds = await detail.boundingBox();
-        expect(actionBounds).not.toBeNull();
-        expect(detailBounds).not.toBeNull();
-        expect(actionBounds!.y + actionBounds!.height).toBeLessThan(detailBounds!.y);
+        // Selection focuses and scrolls the review after Angular renders. Separate
+        // boundingBox calls can sample opposite sides of that scroll on Linux.
+        await expect(review).toBeFocused();
+        const detailHandle = await detail.elementHandle();
+        expect(detailHandle).not.toBeNull();
+        try {
+          const { actionBounds, detailBounds } = await approve.evaluate((button, details) => {
+            if (!details) throw new Error('Missing approval details');
+            return {
+              actionBounds: button.getBoundingClientRect().toJSON(),
+              detailBounds: details.getBoundingClientRect().toJSON(),
+            };
+          }, detailHandle);
+          expect(actionBounds.width).toBeGreaterThan(0);
+          expect(actionBounds.height).toBeGreaterThan(0);
+          expect(detailBounds.height).toBeGreaterThan(0);
+          expect(actionBounds.bottom).toBeLessThan(detailBounds.top);
+          expect(actionBounds.left).toBeGreaterThanOrEqual(0);
+          expect(actionBounds.right).toBeLessThanOrEqual(viewportWidth);
+        } finally {
+          await detailHandle?.dispose();
+        }
         await approve.scrollIntoViewIfNeeded();
         await expect(approve).toBeInViewport();
-        expect(actionBounds!.x).toBeGreaterThanOrEqual(0);
-        expect(actionBounds!.x + actionBounds!.width).toBeLessThanOrEqual(viewportWidth);
       }
       for (const name of ['saved-api', 'saved-database']) {
         const request = list.getByRole('button', { name: new RegExp(`^${name} `) });
@@ -140,6 +155,7 @@ test('approval controls precede long details in wide, narrow and compact views',
         // Wait for this selection to render before resolving its consent checkbox.
         await expect(request).toHaveAttribute('aria-pressed', 'true');
         await expect(review.getByRole('heading', { name, exact: true })).toBeVisible();
+        await expect(review).toBeFocused();
         await review.getByRole('checkbox').check();
         await review.getByRole('button', { name: `Approve ${name}`, exact: true }).click();
       }
