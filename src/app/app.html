@@ -1,12 +1,13 @@
 <tui-root>
+  <a class="skip-link" href="#content" (click)="skipToContent($event)">Skip to content</a>
   <div class="shell" [class.compact]="compact">
-    <aside class="sidebar" aria-label="Application navigation">
+    <aside class="sidebar" tuiTheme="dark" aria-label="Application navigation">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">a/k</span>
         <div>
           <strong>AgentKey</strong>
           @if (!compact) {
-            <small>YOUR SECRETS. YOUR RULES.</small>
+            <small>Your secrets. Your rules.</small>
           }
         </div>
         @if (compact) {
@@ -43,37 +44,42 @@
           </div>
         }
       </div>
-      <p class="sidebar-caption">LOCAL CONTROL</p>
-      <nav aria-label="Main">
-        @for (entry of pages; track entry.id) {
-          <button
-            tuiButton
-            [size]="compact ? 's' : 'm'"
-            [appearance]="page() === entry.id ? 'secondary' : 'flat'"
-            [attr.aria-current]="page() === entry.id ? 'page' : null"
-            [attr.aria-description]="
-              entry.id === 'access' ? pendingCount() + ' requests need review' : null
-            "
-            [disabled]="!snapshot()?.unlocked"
-            (click)="navigate(entry.id)"
-          >
-            <span class="nav-number">{{ entry.number }}</span
-            >{{ compact && entry.id === 'connect' ? 'Connect' : entry.label }}
-            @if (entry.id === 'access' && pendingCount()) {
-              <span class="count-badge" aria-hidden="true">{{ pendingCount() }}</span>
-            }
-          </button>
-        }
-      </nav>
+      @if (snapshot()?.unlocked) {
+        <p class="sidebar-caption">Local control</p>
+        <nav aria-label="Main">
+          @for (entry of pages; track entry.id) {
+            <button
+              tuiButton
+              [size]="compact ? 's' : 'm'"
+              [appearance]="page() === entry.id ? 'secondary' : 'flat'"
+              [attr.aria-current]="page() === entry.id ? 'page' : null"
+              [attr.aria-description]="
+                entry.id === 'access' ? pendingCount() + ' requests need review' : null
+              "
+              (click)="navigate(entry.id)"
+            >
+              <span class="nav-number">{{ entry.number }}</span
+              >{{ compact && entry.id === 'connect' ? 'Connect' : entry.label }}
+              @if (entry.id === 'access' && pendingCount()) {
+                <span class="count-badge" aria-hidden="true">{{ pendingCount() }}</span>
+              }
+            </button>
+          }
+        </nav>
+      }
       <div class="sidebar-bottom">
         <span class="status-dot" [class.unlocked]="snapshot()?.unlocked"></span
         >{{ snapshot()?.unlocked ? 'Vault unlocked' : 'Vault locked' }}
         <p>Local-only · No cloud account<br />Open source · Apache-2.0</p>
       </div>
     </aside>
-    <main>
+    <main
+      id="content"
+      tabindex="-1"
+      [class.locked]="!snapshot()?.unlocked"
+      [attr.tuiTheme]="snapshot()?.unlocked ? null : 'dark'"
+    >
       <header class="topbar">
-        <span class="eyebrow">SECRET ACCESS, NOT SECRET SHARING</span>
         <div class="toolbar-actions">
           <button
             tuiButton
@@ -98,22 +104,62 @@
         </div>
       </header>
       @if (failure()) {
-        <div class="feedback error" role="alert">{{ failure() }}</div>
+        <div class="feedback error" role="alert">
+          <span>{{ failure() }}</span>
+          <button
+            tuiButton
+            type="button"
+            appearance="flat"
+            size="s"
+            aria-label="Dismiss error"
+            (click)="failure.set('')"
+          >
+            ×
+          </button>
+        </div>
       }
       @if (message()) {
-        <div class="feedback" role="status">{{ message() }}</div>
+        <div class="feedback" role="status">
+          <span>{{ message() }}</span>
+          <button
+            tuiButton
+            type="button"
+            appearance="flat"
+            size="s"
+            aria-label="Dismiss message"
+            (click)="message.set('')"
+          >
+            ×
+          </button>
+        </div>
       }
       @if (!snapshot()) {
         <h1>Welcome to AgentKey</h1>
-        <p>Connecting to your local vault…</p>
+        <p class="connecting">Connecting to your local vault…</p>
       } @else if (!snapshot()!.unlocked) {
         <section class="welcome">
-          <div class="eyebrow">A PRIVATE HANDOFF</div>
-          <h1>Let agents work.<br />Keep secrets yours.</h1>
-          <p class="intro">
-            Name your credentials. Decide what they can do.<br />Your agent gets permission—not your
-            password.
-          </p>
+          <div class="welcome-copy">
+            <div class="eyebrow">A private handoff</div>
+            <h1>Let agents work.<br />Keep secrets <em>yours.</em></h1>
+            <p class="intro">
+              Name your credentials. Decide what they can do. Your agent gets permission—not your
+              password.
+            </p>
+            <ol class="handoff-steps" aria-label="How AgentKey works">
+              <li>
+                <span aria-hidden="true">01</span><strong>Name</strong>Save credentials under names.
+                Agents see names, never values.
+              </li>
+              <li>
+                <span aria-hidden="true">02</span><strong>Request</strong>An agent proposes an exact
+                API call, database read or command.
+              </li>
+              <li>
+                <span aria-hidden="true">03</span><strong>Approve</strong>You review it here.
+                Nothing runs until you approve.
+              </li>
+            </ol>
+          </div>
           <form class="unlock-form" (submit)="$event.preventDefault(); authenticate()">
             <h2>{{ snapshot()!.initialized ? 'Unlock your vault' : 'Create your local vault' }}</h2>
             <tui-textfield [tuiTextfieldCleaner]="false"
@@ -175,7 +221,6 @@
           @case ('vault') {
             <div class="page-heading">
               <div>
-                <p class="eyebrow">01 / VAULT</p>
                 <h1>Vault</h1>
                 <p class="hint">Named credentials. Saved values stay private.</p>
               </div>
@@ -191,7 +236,7 @@
             }
             <div class="item-list">
               @for (item of snapshot()!.items; track item.name) {
-                <article class="item-row">
+                <article class="item-row" [attr.data-kind]="item.kind">
                   <div class="item-symbol" aria-hidden="true">
                     {{ item.kind === 'group' ? '{ }' : item.kind === 'login' ? '@' : '*' }}
                   </div>
@@ -200,13 +245,20 @@
                     <h2>{{ item.name }}</h2>
                     <p class="mono">{{ item.fields.join(' · ') }}</p>
                   </div>
-                  <span class="secret-mask" aria-label="Values hidden">••••••••</span>
-                  <div class="row-actions">
-                    <button tuiButton appearance="flat" size="s" (click)="newItem(item)">
-                      Replace values</button
-                    ><button tuiButton appearance="flat" size="s" (click)="deleting.set(item.name)">
-                      Delete
-                    </button>
+                  <div class="item-footer">
+                    <span class="secret-mask" role="img" aria-label="Values hidden">••••••••</span>
+                    <div class="row-actions">
+                      <button tuiButton appearance="flat" size="s" (click)="newItem(item)">
+                        Replace values</button
+                      ><button
+                        tuiButton
+                        appearance="flat"
+                        size="s"
+                        (click)="deleting.set(item.name)"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                   @if (deleting() === item.name) {
                     <div class="delete-confirm">
@@ -239,8 +291,8 @@
           @case ('operations') {
             <div class="page-heading">
               <div>
-                <p class="eyebrow">02 / API OPERATIONS</p>
                 <h1>API operations</h1>
+                <p class="hint">Saved HTTPS requests that agents can ask to run.</p>
               </div>
               <button
                 tuiButton
@@ -250,11 +302,14 @@
                 Add operation
               </button>
             </div>
-            <p class="intro">
-              Ask your agent to prepare a request using a saved secret, then review it in Approvals.
-              No copying passwords, configuring a proxy or manually assembling headers is required.
-              You can still add an operation yourself.
-            </p>
+            <details class="more">
+              <summary>How API operations work</summary>
+              <p>
+                Ask your agent to prepare a request using a saved secret, then review it in
+                Approvals. No copying passwords, configuring a proxy or manually assembling headers
+                is required. You can still add an operation yourself.
+              </p>
+            </details>
             @if (editingOperation()) {
               <app-operation-editor
                 [items]="snapshot()!.items"
@@ -277,7 +332,8 @@
                   </button>
                 </div>
                 <p class="endpoint">
-                  <strong>{{ operation.method }}</strong> {{ operation.url }}
+                  <strong [attr.data-method]="operation.method">{{ operation.method }}</strong>
+                  {{ operation.url }}
                 </p>
                 <p>
                   Uses <code>{{ operation.item }}</code> · {{ operation.auth }} authentication ·
@@ -318,8 +374,8 @@
           @case ('databases') {
             <div class="page-heading">
               <div>
-                <p class="eyebrow">03 / DATABASES</p>
                 <h1>Databases</h1>
+                <p class="hint">Read-only access to the tables and columns you choose.</p>
               </div>
               <button
                 tuiButton
@@ -329,11 +385,14 @@
                 Add database
               </button>
             </div>
-            <p class="intro">
-              Start with a SQLite demo—no server or password needed. Choose tables and columns
-              explicitly. Reads are bounded; agents cannot send SQL or write data. PostgreSQL
-              remains available through Add database.
-            </p>
+            <details class="more">
+              <summary>How database access works</summary>
+              <p>
+                Start with a SQLite demo—no server or password needed. Choose tables and columns
+                explicitly. Reads are bounded; agents cannot send SQL or write data. PostgreSQL
+                remains available through Add database.
+              </p>
+            </details>
             <div class="database-actions">
               <button tuiButton [disabled]="busy()" (click)="prepareSQLite('demo')">
                 Try SQLite demo
@@ -432,9 +491,7 @@
           @case ('access') {
             <div class="page-heading">
               <div>
-                <p class="eyebrow">04 / APPROVALS</p>
                 <h1>Approvals</h1>
-                <p class="hint">Review requests and manage access in one place.</p>
               </div>
             </div>
             <p class="approval-boundary">
@@ -515,7 +572,8 @@
                     </div>
                   }
                   <p class="endpoint">
-                    <strong>{{ operation.method }}</strong> {{ operation.url }}
+                    <strong [attr.data-method]="operation.method">{{ operation.method }}</strong>
+                    {{ operation.url }}
                   </p>
                   <p>Return: {{ operation.responseFields?.join(', ') || 'HTTP status only' }}</p>
                   @if (operation.scope; as scope) {
@@ -645,40 +703,50 @@
           @case ('activity') {
             <div class="page-heading">
               <div>
-                <p class="eyebrow">05 / ACTIVITY</p>
                 <h1>Activity</h1>
+                <p class="hint">
+                  The latest 200 events, encrypted with your vault. No credentials, request bodies
+                  or API responses.
+                </p>
               </div>
             </div>
-            <p class="intro">
-              The latest 200 events, encrypted with your vault. No credentials, request bodies or
-              API responses.
-            </p>
-            <div class="activity-list">
+            <ol class="activity-list" aria-label="Recent activity">
               @for (event of snapshot()!.audit; track $index) {
-                <div class="activity-row">
+                <li class="activity-row" [attr.data-event]="event.event">
                   <time>{{ event.at | date: 'medium' }}</time
-                  ><strong>{{ event.event }}</strong
+                  ><span class="event-tag">{{ event.event }}</span
                   ><code>{{ event.name }}</code
-                  ><span>{{ event.status ?? '' }}</span>
-                </div>
+                  ><span class="event-status">{{ event.status ?? '' }}</span>
+                </li>
               } @empty {
-                <p>No activity yet.</p>
+                <li class="empty-state">
+                  <h2>No activity yet.</h2>
+                  <p>Saves, approvals, revocations and agent attempts will appear here.</p>
+                </li>
               }
-            </div>
+            </ol>
           }
           @case ('connect') {
             <div class="page-heading">
               <div>
-                <p class="eyebrow">06 / CONNECT</p>
                 <h1>Connect an agent</h1>
+                <p class="hint">Add AgentKey to any MCP-compatible client.</p>
               </div>
             </div>
-            <h2>Standard MCP — trusted local clients</h2>
-            <p class="intro">
-              Use this stdio MCP configuration in a compatible client. Client config formats vary;
-              this is the common <code>mcpServers</code> format.
+            <p class="notice">
+              AgentKey is a credential broker, not an agent manager. This MCP connection is not OS
+              isolation. No credentials belong in client configuration, chat or prompts.
             </p>
-            <pre class="config">{{ connection() }}</pre>
+            <h2 class="connect-heading">Standard MCP — trusted local clients</h2>
+            <p class="hint">
+              The common <code>mcpServers</code> stdio format. Client config formats vary.
+            </p>
+            <div class="config-frame">
+              <div class="config-label" aria-hidden="true">
+                <span>mcpServers</span><span>stdio</span>
+              </div>
+              <pre class="config">{{ connection() }}</pre>
+            </div>
             <ol class="setup-steps">
               <li>Add this server to your agent’s MCP configuration and restart its connection.</li>
               <li>Ask it to list AgentKey operations and request access by name.</li>
@@ -688,23 +756,24 @@
                 needed.
               </li>
             </ol>
-            <p class="notice">
-              AgentKey is a credential broker, not an agent manager. Run and isolate your agents
-              yourself; Docker and a special agent runner are not required. This MCP connection is
-              not OS isolation. No credentials belong in client configuration, chat or prompts. The
-              packaged adapter includes its runtime. Only source builds need a supported Node.js on
-              PATH. Closing the window leaves AgentKey running in the tray.
-            </p>
-            <p class="hint">
-              Bundled usage skill: <code>skills/agentkey/SKILL.md</code>. No browser autofill,
-              arbitrary shell execution, cloud sync or iOS support in this release.
-            </p>
+            <details class="more">
+              <summary>Runtime and release notes</summary>
+              <p>
+                Run and isolate your agents yourself; Docker and a special agent runner are not
+                required. The packaged adapter includes its runtime. Only source builds need a
+                supported Node.js on PATH. Closing the window leaves AgentKey running in the tray.
+              </p>
+              <p>
+                Bundled usage skill: <code>skills/agentkey/SKILL.md</code>. No browser autofill,
+                arbitrary shell execution, cloud sync or iOS support in this release.
+              </p>
+            </details>
           }
         }
       }
     </main>
     @if (compact) {
-      <footer class="panel-footer">
+      <footer class="panel-footer" tuiTheme="dark">
         <span class="status-dot" [class.unlocked]="snapshot()?.unlocked"></span>
         {{
           snapshot()?.unlocked

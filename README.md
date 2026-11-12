@@ -221,8 +221,8 @@ pnpm test             # Node tests, including a real stdio MCP round trip
 pnpm build            # strict TypeScript and Angular production build
 pnpm peers check      # dependency peer compatibility
 pnpm test:e2e         # real Electron desktop, synthetic credentials only
-# Headless Linux:
-xvfb-run -a pnpm test:e2e
+# Headless Linux (keep Electron off the interactive Wayland desktop):
+env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET XDG_SESSION_TYPE=x11 xvfb-run -a pnpm test:e2e
 pnpm package:dir      # unsigned host-platform package in release/
 pnpm package          # unsigned installer; no publishing
 ```
@@ -244,3 +244,5 @@ Old backups can restore old approvals, including previously accepted sharing con
 ## License
 
 [Apache License 2.0](LICENSE). Source: [WebArtistas/agentkey](https://github.com/WebArtistas/agentkey). Product name availability and trademark clearance have not been checked. No signed installer or binary release is published.
+
+The bundled Bricolage Grotesque font is copyright 2022 The Bricolage Grotesque Project Authors and licensed under the [SIL Open Font License 1.1](public/licenses/bricolage-grotesque.txt). Its notice is included in the built app at `dist/agentkey/browser/licenses/bricolage-grotesque.txt`.

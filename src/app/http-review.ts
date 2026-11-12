@@ -30,7 +30,10 @@ import type {
         <strong>{{ action() }}</strong> · {{ review().operation.name }}
       </p>
       <p class="endpoint">
-        <strong>{{ review().operation.method }}</strong> {{ review().operation.url }}
+        <strong [attr.data-method]="review().operation.method">{{
+          review().operation.method
+        }}</strong>
+        {{ review().operation.url }}
       </p>
       <p>
         Use saved secret <code>{{ review().operation.item }}</code

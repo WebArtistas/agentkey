@@ -102,7 +102,7 @@ test('desktop creates all item types, approves an agent, revokes and locks', asy
     await expect(page.locator('.shell')).toHaveCSS('display', 'grid');
     await expect(page.getByRole('button', { name: 'Add item', exact: true })).toHaveCSS(
       'background-color',
-      'rgb(39, 91, 66)',
+      'rgb(17, 25, 21)',
     );
     await page.screenshot({ path: 'test-results/vault.png', fullPage: true });
     await checkAccessibility(page);

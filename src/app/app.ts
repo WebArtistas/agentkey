@@ -163,6 +163,11 @@ export class App {
     }, 2000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
   }
+  protected skipToContent(event: Event): void {
+    // A hash link would navigate away from the custom-protocol document.
+    event.preventDefault();
+    document.getElementById('content')?.focus();
+  }
   protected openApprovals(): void {
     this.navigate('access');
     this.approvalInbox()?.showPending();

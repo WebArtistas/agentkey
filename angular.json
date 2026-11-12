@@ -59,7 +59,11 @@
                 "output": "assets/taiga-ui/icons"
               }
             ],
-            "styles": ["@taiga-ui/styles/taiga-ui-theme.less", "src/styles.less"]
+            "styles": [
+              "@taiga-ui/styles/taiga-ui-theme.less",
+              "@fontsource-variable/bricolage-grotesque/opsz.css",
+              "src/styles.less"
+            ]
           },
           "configurations": {
             "production": {

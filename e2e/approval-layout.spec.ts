@@ -101,6 +101,11 @@ test('approval controls precede long details in wide, narrow and compact views',
         await page.getByRole('button', { name: 'Quick access', exact: true }).click();
         view = await opening;
         await view.waitForURL('**?view=compact');
+        const panelWindow = await app.browserWindow(view);
+        await expect
+          .poll(() => panelWindow.evaluate((panel) => panel.isVisible() && panel.isFocused()))
+          .toBe(true);
+        await panelWindow.dispose();
         await view.getByRole('button', { name: 'Approvals', exact: true }).click();
       } else {
         await page.setViewportSize({ width, height: 950 });
@@ -129,7 +134,12 @@ test('approval controls precede long details in wide, narrow and compact views',
         expect(actionBounds!.x + actionBounds!.width).toBeLessThanOrEqual(viewportWidth);
       }
       for (const name of ['saved-api', 'saved-database']) {
-        await list.getByRole('button', { name: new RegExp(`^${name} `) }).click();
+        const request = list.getByRole('button', { name: new RegExp(`^${name} `) });
+        await request.click();
+        // Approval removes the previous card and briefly selects the next pending request.
+        // Wait for this selection to render before resolving its consent checkbox.
+        await expect(request).toHaveAttribute('aria-pressed', 'true');
+        await expect(review.getByRole('heading', { name, exact: true })).toBeVisible();
         await review.getByRole('checkbox').check();
         await review.getByRole('button', { name: `Approve ${name}`, exact: true }).click();
       }
